@@ -169,25 +169,31 @@ public class Lexer
         {
             if (!" \t".Contains((char)current_char))
             {
-                switch(current_char)
+                switch (current_char)
                 {
                     case '+':
                         tokens.Add(MainScript.TT_PLUS);
+                        advance();
                         break;
                     case '-':
                         tokens.Add(MainScript.TT_MINUS);
+                        advance();
                         break;
                     case '*':
                         tokens.Add(MainScript.TT_MUL);
+                        advance();
                         break;
                     case '/':
                         tokens.Add(MainScript.TT_DIV);
+                        advance();
                         break;
                     case '(':
                         tokens.Add(MainScript.TT_LPAREN);
+                        advance();
                         break;
                     case ')':
                         tokens.Add(MainScript.TT_RPAREN);
+                        advance();
                         break;
                     default:
                         if (MainScript.DIGITS.Contains((char)current_char))
@@ -199,12 +205,13 @@ public class Lexer
                             Position pos_start = pos.copy();
                             char tempChar = (char)current_char;
                             advance();
-                            return new TokensAndError(new List<Token>(), new CustomError(pos_start , pos, "Illegal Character", "'" + tempChar + "'")); 
+                            return new TokensAndError(new List<Token>(), new CustomError(pos_start, pos, "Illegal Character", "'" + tempChar + "'"));
                         }
                         break;
                 }
             }
-            advance();
+            else
+                advance();
         }
 
         return new TokensAndError(tokens, new CustomError(new Position(0, 0, 0, null, null), new Position(0, 0, 0, null, null), null, null));
