@@ -22,16 +22,17 @@ namespace MacroBotV0._1Language
 
         public override string ToString() =>
             $"{errorName}: {details}\n" +
-            $"File {pos_start.fn}, line {pos_start.ln + 1}";
+            $"File {pos_start.fn}, line {pos_start.ln + 1}" +
+            "\n\n" + StringsWithArrows.StringWithArrows(pos_start.ftxt, pos_start, pos_end);
     }
 
     public class IllegalCharError : CustomError
     {
-        public IllegalCharError(Position pos_start, Position pos_end, string errorName, string details) : base(pos_start, pos_end, "Illegal Character", details) { }
+        public IllegalCharError(Position pos_start, Position pos_end, string details) : base(pos_start, pos_end, "Illegal Character", details) { }
     }
 
     public class InvalidSyntaxError : CustomError
     {
-        public InvalidSyntaxError(Position pos_start, Position pos_end, string errorName, string details = "") : base(pos_start, pos_end, "Invalid Syntax", details) { }
+        public InvalidSyntaxError(Position pos_start, Position pos_end, string details) : base(pos_start, pos_end, "Invalid Syntax", details) { }
     }
 }

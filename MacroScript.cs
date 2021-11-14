@@ -9,14 +9,15 @@ public static class MainScript
     public static string DIGITS = "0123456789";
 
     //tokens constants
-    public static Token TT_INT = new Token("TT_INT");
-    public static Token TT_FLOAT = new Token("TT_FLOAT");
-    public static Token TT_PLUS = new Token("TT_PLUS");
-    public static Token TT_MINUS = new Token("TT_MINUS");
-    public static Token TT_MUL = new Token("TT_MUL");
-    public static Token TT_DIV = new Token("TT_DIV");
-    public static Token TT_LPAREN = new Token("TT_LPAREN");
-    public static Token TT_RPAREN = new Token("TT_RPAREN");
+    public static string TT_INT = "TT_INT";
+    public static string TT_FLOAT = "TT_FLOAT";
+    public static string TT_PLUS = "TT_PLUS";
+    public static string TT_MINUS = "TT_MINUS";
+    public static string TT_MUL = "TT_MUL";
+    public static string TT_DIV = "TT_DIV";
+    public static string TT_LPAREN = "TT_LPAREN";
+    public static string TT_RPAREN = "TT_RPAREN";
+    public static string TT_EOF = "TT_EOF";
 
 
 
@@ -34,10 +35,10 @@ public static class MainScript
 
         //generate AST
         Parser parser = new Parser(tokens);
-        Node ast = parser.parse();
+        ParseResult ast = parser.parse();
 
 
-        return (ast, null);
+        return (ast.node, ast.error);
     }
 
 
@@ -87,8 +88,54 @@ public class BinOpNode : Node
     public override string ToString() => $"({left_node}, {tok}, {right_node})";
 }
 
+public class UnaryOpNode : Node
+{
+    Node node;
+
+    public UnaryOpNode(Token op_tok, Node node) : base(op_tok)
+    {
+        this.node = node;
+    }
+
+    public override string ToString() => $"({tok}, {node})";
+}
 
 
+//parse result----------------------------------------------------
+
+class ParseResult
+{
+    public CustomError error;
+    public Node node;
+
+    public ParseResult(){
+    }
+
+    public Node register(object res) {
+        if(res is ParseResult)
+        {
+            ParseResult parRes = (ParseResult)res;
+            if(parRes.error != null)
+                error = parRes.error;
+            return parRes.node;
+        }
+        if(res is Node)
+        {
+            Node node = (Node)res;
+            return node;//might be a problem
+        }
+        return null;
+    }
+    public ParseResult success(Node node) {
+        this.node = node;
+        return this;
+    }
+    public ParseResult failure(CustomError error) {
+        this.error = error;
+        return this;
+    }
+
+}
 
 
 //Parser----------------------------------------------------------
@@ -116,47 +163,102 @@ class Parser
     }
 
     //#################################################################
-    public Node parse() => expr();
-
-
-    NumberNode factor()
+    public ParseResult parse()
     {
+        ParseResult res = expr();
+        if(res.error == null && this.current_tok.type != MainScript.TT_EOF)
+        {
+            return res.failure(new InvalidSyntaxError(
+                this.current_tok.posStart,
+                this.current_tok.posEnd,
+                "Expected '+', '-', '*' or '/'"));
+        }
+        return res;
+    }
+
+
+    ParseResult factor()
+    {
+        ParseResult res = new ParseResult();
         Token tok = current_tok;
 
-        if (MainScript.TT_INT.type == tok.type || MainScript.TT_FLOAT.type == tok.type)
+        if( tok.type == MainScript.TT_MINUS || tok.type == MainScript.TT_PLUS)
         {
-            advance();
-            return new NumberNode(tok);
+            res.register(advance());
+            Node factorTemp = res.register(factor());
+            if (res.error != null)
+                return res;
+            return res.success(new UnaryOpNode(tok, factorTemp));
+
         }
-        return null;
+        else if (MainScript.TT_INT == tok.type || MainScript.TT_FLOAT == tok.type)
+        {
+            res.register(advance());//might be a problem...
+            return res.success(new NumberNode(tok));
+        } else if( tok.type == MainScript.TT_LPAREN)
+        {
+            res.register(advance());
+            Node exprTemp = res.register(expr());
+            if (res.error != null)
+                return res;
+            if(current_tok.type == MainScript.TT_RPAREN)
+            {
+                res.register(advance());
+                return res.success(exprTemp);
+            }
+            else
+            {
+                return res.failure(new InvalidSyntaxError(
+                    current_tok.posStart,
+                    current_tok.posEnd,
+                    "Expected ')'"));
+            }
+        }
+
+
+        return res.failure(
+            new InvalidSyntaxError(
+                tok.posStart,
+                tok.posEnd,
+                "Expected int or float"));
     }
 
-    Node term()
+    ParseResult term()
     {
-        Node left = factor();
+        ParseResult res = new ParseResult();
+        Node left = res.register(factor());
+        if (res.error != null)
+            return res;
 
-        while (current_tok.type == MainScript.TT_MUL.type || current_tok.type == MainScript.TT_DIV.type)
+        while (current_tok.type == MainScript.TT_MUL || current_tok.type == MainScript.TT_DIV)
         {
             Token op_tok = current_tok;
-            advance();
-            NumberNode right = factor();
+            res.register(advance());
+            Node right = res.register(factor());
+            if (res.error != null)
+                return res;
             left = new BinOpNode(left, op_tok, right);
         }
-        return left;
+        return res.success(left);
     }
 
-    Node expr()
+    ParseResult expr()
     {
-        Node left = term();
+        ParseResult res = new ParseResult();
+        Node left = res.register(term());
+        if (res.error != null)
+            return res;
 
-        while (current_tok.type == MainScript.TT_PLUS.type || current_tok.type == MainScript.TT_MINUS.type)
+        while (current_tok.type == MainScript.TT_PLUS || current_tok.type == MainScript.TT_MINUS)
         {
             Token op_tok = current_tok;
-            advance();
-            Node right = term();
+            res.register(advance());
+            Node right = res.register(term());
+            if (res.error != null)
+                return res;
             left = new BinOpNode(left, op_tok, right);
         }
-        return left;
+        return res.success(left);
     }
 
 
@@ -181,7 +283,7 @@ public class Position
         this.ftxt = ftxt;
     }
 
-    public Position advance(char? current_char)
+    public Position advance(char? current_char = null)
     {
         idx++;
         col++;
@@ -234,6 +336,7 @@ public class Lexer
     {
         string numb_str = "";
         int dot_count = 0;
+        Position posStart = pos.copy();
 
         while (current_char != null && (MainScript.DIGITS + ".").Contains((char)current_char))
         {
@@ -252,10 +355,10 @@ public class Lexer
         }
 
         if (dot_count == 0)
-            return MainScript.TT_INT.return_new_with_value(Int32.Parse(numb_str));
+            return new Token(MainScript.TT_INT, Int32.Parse(numb_str), posStart, this.pos);
         else
         {
-            return MainScript.TT_FLOAT.return_new_with_value(float.Parse(numb_str));
+            return new Token(MainScript.TT_FLOAT, float.Parse(numb_str), posStart, this.pos);
         }
 
     }
@@ -271,27 +374,27 @@ public class Lexer
                 switch (current_char)
                 {
                     case '+':
-                        tokens.Add(MainScript.TT_PLUS);
+                        tokens.Add(new Token(MainScript.TT_PLUS, posStart: this.pos));
                         advance();
                         break;
                     case '-':
-                        tokens.Add(MainScript.TT_MINUS);
+                        tokens.Add(new Token(MainScript.TT_MINUS, posStart: this.pos));
                         advance();
                         break;
                     case '*':
-                        tokens.Add(MainScript.TT_MUL);
+                        tokens.Add(new Token(MainScript.TT_MUL, posStart: this.pos));
                         advance();
                         break;
                     case '/':
-                        tokens.Add(MainScript.TT_DIV);
+                        tokens.Add(new Token(MainScript.TT_DIV, posStart: this.pos));
                         advance();
                         break;
                     case '(':
-                        tokens.Add(MainScript.TT_LPAREN);
+                        tokens.Add(new Token(MainScript.TT_LPAREN, posStart: this.pos));
                         advance();
                         break;
                     case ')':
-                        tokens.Add(MainScript.TT_RPAREN);
+                        tokens.Add(new Token(MainScript.TT_RPAREN, posStart: this.pos));
                         advance();
                         break;
                     default:
@@ -304,7 +407,7 @@ public class Lexer
                             Position pos_start = pos.copy();
                             char tempChar = (char)current_char;
                             advance();
-                            return  (new List<Token>(), new IllegalCharError(pos_start, pos, "Illegal Character", "'" + tempChar + "'"));
+                            return  (new List<Token>(), new IllegalCharError(pos_start, pos, "'" + tempChar + "'"));
                         }
                         break;
                 }
@@ -313,6 +416,7 @@ public class Lexer
                 advance();
         }
 
+        tokens.Add(new Token(MainScript.TT_EOF, posStart: this.pos));
         return (tokens, null);
     }
 
@@ -328,16 +432,22 @@ public class Token
 {
     public string type;
     object value;
+    public Position posStart;
+    public Position posEnd;
 
-    public Token(string type_, object value = null)
+    public Token(string type, object value = null, Position posStart = null, Position posEnd = null)
     {
-        this.type = type_;
+        this.type = type;
         this.value = value;
-    }
 
-    public Token return_new_with_value(object val)
-    {
-        return new Token(type, val);
+        if (posStart != null)
+        {
+            this.posStart = posStart.copy();
+            this.posEnd = posStart.copy();
+            this.posEnd.advance();
+        }
+        if (posEnd != null)
+            this.posEnd = posEnd.copy();
     }
 
     public override string ToString()
