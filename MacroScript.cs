@@ -1,4 +1,5 @@
-﻿using System;
+﻿using MacroBotV0._1Language;
+using System;
 using System.Collections.Generic;
 using System.Globalization;
 
@@ -18,37 +19,149 @@ public static class MainScript
     public static Token TT_RPAREN = new Token("TT_RPAREN");
 
 
-    public static TokensAndError Run(string fn, string text)
+
+    //Run-------------------------------------------------------------
+    public static (Node, CustomError) Run(string fn, string text)
     {
-        Lexer lexer = new Lexer( fn, text);
-        TokensAndError tokensAndError = lexer.make_tokens();
-        return tokensAndError;
+        //generate tokens
+        Lexer lexer = new Lexer(fn, text);
+        (List<Token>, CustomError) tokensAndError = lexer.make_tokens();
+        List<Token> tokens = tokensAndError.Item1;
+        //Console.WriteLine(tokens.ToDelimitedString()); //debug
+        CustomError error = tokensAndError.Item2;
+        if (error != null)
+            return (null, error);
+
+        //generate AST
+        Parser parser = new Parser(tokens);
+        Node ast = parser.parse();
+
+
+        return (ast, null);
     }
 
 
 }
 
 
-//Custom Errors-------------------------------------------------------
-public class CustomError{
-    public string errorName;
-    public string details;
-    public Position pos_start;
-    public Position pos_end;
 
-    public CustomError(Position pos_start, Position pos_end, string errorName, string details)
+
+//Nodes------------------------------------------------------------
+
+public class Node
+{
+    protected Token tok;
+
+    public Node(Token tok)
     {
-        this.pos_start = pos_start;
-        this.pos_end = pos_end;
-        this.errorName = errorName;
-        this.details = details;
+        this.tok = tok;
     }
 
-    public override string ToString()
-    {
-        return errorName + ":" + details + "\nFile " + pos_start.fn + ", line " + (pos_start.ln + 1);
-    }
+    public override string ToString() => tok.ToString();
+
 }
+
+
+public class NumberNode : Node
+{
+
+    public NumberNode(Token tok) : base(tok)
+    {
+    }
+
+    public override string ToString() => tok.ToString();
+
+}
+
+public class BinOpNode : Node
+{
+    Node left_node;
+    Node right_node;
+
+    public BinOpNode(Node left_node, Token op_tok, Node right_node) : base(op_tok)
+    {
+        this.left_node = left_node;
+        this.right_node = right_node;
+    }
+
+    public override string ToString() => $"({left_node}, {tok}, {right_node})";
+}
+
+
+
+
+
+//Parser----------------------------------------------------------
+class Parser
+{
+    List<Token> tokens;
+    int tok_idx;
+    Token current_tok;
+
+    public Parser(List<Token> tokens)
+    {
+        this.tokens = tokens;
+        tok_idx = -1;
+        advance();
+    }
+
+    Token advance()
+    {
+        tok_idx++;
+        if (tok_idx < tokens.Count)
+        {
+            current_tok = tokens[tok_idx];
+        }
+        return current_tok;
+    }
+
+    //#################################################################
+    public Node parse() => expr();
+
+
+    NumberNode factor()
+    {
+        Token tok = current_tok;
+
+        if (MainScript.TT_INT.type == tok.type || MainScript.TT_FLOAT.type == tok.type)
+        {
+            advance();
+            return new NumberNode(tok);
+        }
+        return null;
+    }
+
+    Node term()
+    {
+        Node left = factor();
+
+        while (current_tok.type == MainScript.TT_MUL.type || current_tok.type == MainScript.TT_DIV.type)
+        {
+            Token op_tok = current_tok;
+            advance();
+            NumberNode right = factor();
+            left = new BinOpNode(left, op_tok, right);
+        }
+        return left;
+    }
+
+    Node expr()
+    {
+        Node left = term();
+
+        while (current_tok.type == MainScript.TT_PLUS.type || current_tok.type == MainScript.TT_MINUS.type)
+        {
+            Token op_tok = current_tok;
+            advance();
+            Node right = term();
+            left = new BinOpNode(left, op_tok, right);
+        }
+        return left;
+    }
+
+
+}
+
 //Position------------------------------------------------------------
 
 public class Position
@@ -90,20 +203,6 @@ public class Position
 
 
 
-//Structure for return------------------------------------------------
-public struct TokensAndError{
-    public List<Token> tokens;
-    public CustomError error;
-
-    public TokensAndError(List<Token> tokens, CustomError error)
-    {
-        this.tokens = tokens;
-        this.error = error;
-    }
-}
-
-
-
 
 //LEXER---------------------------------------------------------------
 
@@ -138,7 +237,7 @@ public class Lexer
 
         while (current_char != null && (MainScript.DIGITS + ".").Contains((char)current_char))
         {
-            if(current_char == '.')
+            if (current_char == '.')
             {
                 if (dot_count == 1)
                     break;
@@ -161,7 +260,7 @@ public class Lexer
 
     }
 
-     public TokensAndError make_tokens()
+    public (List<Token>, CustomError) make_tokens()
     {
         List<Token> tokens = new List<Token>();
 
@@ -205,7 +304,7 @@ public class Lexer
                             Position pos_start = pos.copy();
                             char tempChar = (char)current_char;
                             advance();
-                            return new TokensAndError(new List<Token>(), new CustomError(pos_start, pos, "Illegal Character", "'" + tempChar + "'"));
+                            return  (new List<Token>(), new IllegalCharError(pos_start, pos, "Illegal Character", "'" + tempChar + "'"));
                         }
                         break;
                 }
@@ -214,7 +313,7 @@ public class Lexer
                 advance();
         }
 
-        return new TokensAndError(tokens, new CustomError(new Position(0, 0, 0, null, null), new Position(0, 0, 0, null, null), null, null));
+        return (tokens, null);
     }
 
 
@@ -227,25 +326,25 @@ public class Lexer
 
 public class Token
 {
-    string type_;
+    public string type;
     object value;
 
     public Token(string type_, object value = null)
     {
-        this.type_ = type_;
+        this.type = type_;
         this.value = value;
     }
 
     public Token return_new_with_value(object val)
     {
-        return new Token(type_, val);
+        return new Token(type, val);
     }
 
     public override string ToString()
     {
         if (value != null)
-            return type_ + ":" + value.ToString();
-        return type_;
+            return type + ":" + value.ToString();
+        return type;
     }
 
 }

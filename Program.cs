@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using static MainScript;
 
 namespace MacroBotV0._1Language
 {
@@ -16,13 +17,16 @@ namespace MacroBotV0._1Language
             {
                 Console.Write("MacroScript > "); 
                 string txt = Console.ReadLine();
-               // Console.WriteLine(txt);
+                // Console.WriteLine(txt);
 
-                TokensAndError tokensAndError = MainScript.Run("<TestFileName>" ,txt);
-                if (tokensAndError.error.errorName != null)
-                    Console.WriteLine(tokensAndError.error);
+                (Node, CustomError) tokensAndError = MainScript.Run("<TestFileName>" ,txt);
+                CustomError error = tokensAndError.Item2;
+                Node Node = tokensAndError.Item1;
+
+                if (error != null)
+                    Console.WriteLine(error);
                 else
-                    Console.WriteLine(tokensAndError.tokens.ToDelimitedString());
+                    Console.WriteLine(Node.ToString());
             }
         }
     }
