@@ -19,14 +19,14 @@ namespace MacroBotV0._1Language
                 string txt = Console.ReadLine();
                 // Console.WriteLine(txt);
 
-                (Node, CustomError) tokensAndError = MainScript.Run("<TestFileName>" ,txt);
+                (Number, CustomError) tokensAndError = MainScript.Run("<TestFileName>" ,txt);
                 CustomError error = tokensAndError.Item2;
-                Node Node = tokensAndError.Item1;
+                Number number = tokensAndError.Item1;
 
                 if (error != null)
                     Console.WriteLine(error);
                 else
-                    Console.WriteLine(Node.ToString());
+                    Console.WriteLine(number.ToString());
             }
         }
     }

@@ -2,6 +2,7 @@
 using System;
 using System.Collections.Generic;
 using System.Globalization;
+using System.Reflection;
 
 public static class MainScript
 {
@@ -22,7 +23,7 @@ public static class MainScript
 
 
     //Run-------------------------------------------------------------
-    public static (Node, CustomError) Run(string fn, string text)
+    public static (Number, CustomError) Run(string fn, string text)
     {
         //generate tokens
         Lexer lexer = new Lexer(fn, text);
@@ -36,9 +37,15 @@ public static class MainScript
         //generate AST
         Parser parser = new Parser(tokens);
         ParseResult ast = parser.parse();
+        if (ast.error != null)
+            return (null, ast.error);
+
+        // Run program
+        Interpreter interpreter = new Interpreter();
+        Number result = interpreter.Visit(ast.node);
 
 
-        return (ast.node, ast.error);
+        return (result, ast.error);
     }
 
 
@@ -51,7 +58,9 @@ public static class MainScript
 
 public class Node
 {
-    protected Token tok;
+    public Token tok;
+    public Position PosStart;
+    public Position PosEnd;
 
     public Node(Token tok)
     {
@@ -65,9 +74,10 @@ public class Node
 
 public class NumberNode : Node
 {
-
     public NumberNode(Token tok) : base(tok)
     {
+        this.PosStart = tok.posStart;
+        this.PosEnd = tok.posEnd;
     }
 
     public override string ToString() => tok.ToString();
@@ -76,13 +86,15 @@ public class NumberNode : Node
 
 public class BinOpNode : Node
 {
-    Node left_node;
-    Node right_node;
+    public Node left_node;
+    public Node right_node;
 
     public BinOpNode(Node left_node, Token op_tok, Node right_node) : base(op_tok)
     {
         this.left_node = left_node;
         this.right_node = right_node;
+        this.PosStart = left_node.PosStart;
+        this.PosEnd = right_node.PosEnd;
     }
 
     public override string ToString() => $"({left_node}, {tok}, {right_node})";
@@ -90,11 +102,14 @@ public class BinOpNode : Node
 
 public class UnaryOpNode : Node
 {
-    Node node;
+    public Node node;
 
     public UnaryOpNode(Token op_tok, Node node) : base(op_tok)
     {
         this.node = node;
+
+        this.PosStart = op_tok.posStart;
+        this.PosEnd = node.PosEnd;
     }
 
     public override string ToString() => $"({tok}, {node})";
@@ -431,14 +446,14 @@ public class Lexer
 public class Token
 {
     public string type;
-    object value;
+    public float? value;
     public Position posStart;
     public Position posEnd;
 
-    public Token(string type, object value = null, Position posStart = null, Position posEnd = null)
+    public Token(string type, float? value = null, Position posStart = null, Position posEnd = null)
     {
         this.type = type;
-        this.value = value;
+        this.value = value;//temporary fix
 
         if (posStart != null)
         {
@@ -456,5 +471,102 @@ public class Token
             return type + ":" + value.ToString();
         return type;
     }
+
+}
+
+
+//Values
+//###################################################
+public class Number
+{
+    public float? Value;
+    Position PosStart;
+    Position PosEnd;
+
+    public Number(float? value)
+    {
+        this.Value = value;
+        SetPos();
+    }
+
+    public Number SetPos(Position posStart = null, Position posEnd = null){
+        this.PosStart = posStart;
+        this.PosEnd = posEnd;
+        return this;
+    }
+    public Number AddedTo(Number other){
+        return new Number(Value + other.Value);
+    }
+    public Number SubbedBy(Number other)
+    {
+        return new Number(Value - other.Value);
+    }
+    public Number MultedBy(Number other)
+    {
+        return new Number(Value * other.Value);
+    }
+    public Number DivBy(Number other)
+    {
+        return new Number(Value / other.Value);
+    }
+
+    public override string ToString()
+    {
+        return Value.ToString();
+    }
+}
+
+
+
+//Interpreter
+//###################################################
+
+class Interpreter
+{
+    public Number Visit(Node node) {
+        string method_name = $"Visit_{node.GetType().Name}";
+
+        Type thisType = this.GetType();
+        MethodInfo theMethod = thisType.GetMethod(method_name);
+        object[] context = { node };
+        return (Number)theMethod.Invoke(this, context);
+    }
+    public void NoVisitMethod(Node node)
+    {
+        throw new Exception($"No Visit_{node.GetType().Name} method defined");
+    }
+
+    public Number Visit_NumberNode(NumberNode node)
+    {
+        return new Number(node.tok.value).SetPos(node.PosStart, node.PosEnd);
+    }
+    public Number Visit_BinOpNode(BinOpNode node)
+    {
+        Console.WriteLine("Found bin op node");
+        Number left = Visit(node.left_node);
+        Number right = Visit(node.right_node);
+
+        if (node.tok.type == MainScript.TT_PLUS)
+            return left.AddedTo(right).SetPos(node.PosStart, node.PosEnd);
+        if (node.tok.type == MainScript.TT_MINUS)
+            return left.SubbedBy(right).SetPos(node.PosStart, node.PosEnd);
+        if (node.tok.type == MainScript.TT_MUL)
+            return left.MultedBy(right).SetPos(node.PosStart, node.PosEnd);
+        if (node.tok.type == MainScript.TT_DIV)
+            return left.DivBy(right).SetPos(node.PosStart, node.PosEnd);
+        return left.SetPos(node.PosStart, node.PosEnd);
+
+    }
+    public Number Visit_UnaryOpNode(UnaryOpNode node)
+    {
+        Console.WriteLine("Found unary op node");
+        Number numb = Visit(node.node);
+
+        if (node.tok.type == MainScript.TT_PLUS)
+            return numb.MultedBy(new Number(-1)).SetPos(node.PosStart, node.PosEnd);
+
+        return numb.SetPos(node.PosStart, node.PosEnd);
+    }
+
 
 }
