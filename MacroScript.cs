@@ -562,7 +562,7 @@ class Interpreter
         Console.WriteLine("Found unary op node");
         Number numb = Visit(node.node);
 
-        if (node.tok.type == MainScript.TT_PLUS)
+        if (node.tok.type == MainScript.TT_MINUS)
             return numb.MultedBy(new Number(-1)).SetPos(node.PosStart, node.PosEnd);
 
         return numb.SetPos(node.PosStart, node.PosEnd);
