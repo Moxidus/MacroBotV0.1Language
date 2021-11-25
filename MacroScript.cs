@@ -42,15 +42,44 @@ public static class MainScript
 
         // Run program
         Interpreter interpreter = new Interpreter();
-        Number result = interpreter.Visit(ast.node);
+        Context context = new Context("<Program>");
+        RTResult result = interpreter.Visit(ast.node, context);
 
 
-        return (result, ast.error);
+        return (result.value, result.error);
     }
 
 
 }
 
+
+
+//RunTime Result--------------------------------------------------
+class RTResult
+{
+    public Number value;
+    public CustomError error;
+
+    public Number register(RTResult res)
+    {
+        if (res.error != null)
+            error = res.error;
+        return res.value;
+    }
+
+    public RTResult success(Number value)
+    {
+        this.value = value;
+        return this;
+    }
+
+    public RTResult failure(CustomError error)
+    {
+        this.error = error;
+        return this;
+    }
+
+}
 
 
 
@@ -482,6 +511,7 @@ public class Number
     public float? Value;
     Position PosStart;
     Position PosEnd;
+    public Context Context;
 
     public Number(float? value)
     {
@@ -494,27 +524,56 @@ public class Number
         this.PosEnd = posEnd;
         return this;
     }
-    public Number AddedTo(Number other){
-        return new Number(Value + other.Value);
+    public (Number, CustomError) AddedTo(Number other){
+        return (new Number(Value + other.Value).setContext(this.Context), null);
     }
-    public Number SubbedBy(Number other)
+    public (Number, CustomError) SubbedBy(Number other)
     {
-        return new Number(Value - other.Value);
+        return (new Number(Value - other.Value).setContext(this.Context), null);
     }
-    public Number MultedBy(Number other)
+    public (Number, CustomError) MultedBy(Number other)
     {
-        return new Number(Value * other.Value);
+        return (new Number(Value * other.Value).setContext(this.Context), null);
     }
-    public Number DivBy(Number other)
+    public (Number, CustomError) DivBy(Number other)
     {
-        return new Number(Value / other.Value);
+        if (other.Value == 0)
+            return (null, new RTError(other.PosStart, other.PosEnd, "Division by zero", this.Context));
+        return (new Number(Value / other.Value).setContext(this.Context), null);
     }
 
     public override string ToString()
     {
         return Value.ToString();
     }
+
+    public Number setContext(Context context = null)
+    {
+        this.Context = context;
+        return this;
+    }
 }
+
+
+
+//Context
+//###################################################
+
+
+public class Context
+{
+    public string displayName;
+    public Context parent;
+    public Position parentEtrPos;
+
+    public Context(string displayName, Context parent = null, Position parentEtrPos = null)
+    {
+        this.displayName = displayName;
+        this.parent = parent;
+        this.parentEtrPos = parentEtrPos;
+    }
+}
+
 
 
 
@@ -523,49 +582,74 @@ public class Number
 
 class Interpreter
 {
-    public Number Visit(Node node) {
+    public RTResult Visit(Node node, Context context) {
         string method_name = $"Visit_{node.GetType().Name}";
 
         Type thisType = this.GetType();
         MethodInfo theMethod = thisType.GetMethod(method_name);
-        object[] context = { node };
-        return (Number)theMethod.Invoke(this, context);
+        object[] para = { node, context };
+        return (RTResult)theMethod.Invoke(this, para);
     }
-    public void NoVisitMethod(Node node)
+    public void NoVisitMethod(Node node, Context context)
     {
         throw new Exception($"No Visit_{node.GetType().Name} method defined");
     }
 
-    public Number Visit_NumberNode(NumberNode node)
+    public RTResult Visit_NumberNode(NumberNode node, Context context)
     {
-        return new Number(node.tok.value).SetPos(node.PosStart, node.PosEnd);
+        return new RTResult().success(
+            new Number(node.tok.value).setContext(context).SetPos(node.PosStart, node.PosEnd));
     }
-    public Number Visit_BinOpNode(BinOpNode node)
+    public RTResult Visit_BinOpNode(BinOpNode node, Context context)
     {
-        Console.WriteLine("Found bin op node");
-        Number left = Visit(node.left_node);
-        Number right = Visit(node.right_node);
+        RTResult res = new RTResult();
+
+
+        Number left = res.register(Visit(node.left_node, context));
+        if (res.error != null)
+            return res;
+        Number right = res.register(Visit(node.right_node, context));
+        if (res.error != null)
+            return res;
+
+        (Number, CustomError) result = (null, null);
 
         if (node.tok.type == MainScript.TT_PLUS)
-            return left.AddedTo(right).SetPos(node.PosStart, node.PosEnd);
+            result = left.AddedTo(right);
         if (node.tok.type == MainScript.TT_MINUS)
-            return left.SubbedBy(right).SetPos(node.PosStart, node.PosEnd);
+            result = left.SubbedBy(right);
         if (node.tok.type == MainScript.TT_MUL)
-            return left.MultedBy(right).SetPos(node.PosStart, node.PosEnd);
+            result = left.MultedBy(right);
         if (node.tok.type == MainScript.TT_DIV)
-            return left.DivBy(right).SetPos(node.PosStart, node.PosEnd);
-        return left.SetPos(node.PosStart, node.PosEnd);
+            result = left.DivBy(right);
+
+        if (result.Item2 != null)
+            return res.failure(result.Item2);
+        else
+            return res.success(result.Item1.SetPos(node.PosStart, node.PosEnd));
 
     }
-    public Number Visit_UnaryOpNode(UnaryOpNode node)
+    public RTResult Visit_UnaryOpNode(UnaryOpNode node, Context context)
     {
-        Console.WriteLine("Found unary op node");
-        Number numb = Visit(node.node);
+        RTResult res = new RTResult();
+
+
+        Number numb = res.register(Visit(node.node, context));
+        if (res.error != null)
+            return res;
+
+
+        (Number, CustomError) result = (numb, null);
+
 
         if (node.tok.type == MainScript.TT_MINUS)
-            return numb.MultedBy(new Number(-1)).SetPos(node.PosStart, node.PosEnd);
+            result = numb.MultedBy(new Number(-1));
 
-        return numb.SetPos(node.PosStart, node.PosEnd);
+
+        if (res.error != null)
+            return res.failure(result.Item2);
+        else
+            return res.success(result.Item1.SetPos(node.PosStart, node.PosEnd));
     }
 
 
