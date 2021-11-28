@@ -3,22 +3,32 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Reflection;
+using System.Linq;
 
 public static class MainScript
 {
     //digit constants
     public static string DIGITS = "0123456789";
+    public static string LETTERS = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz_";
+    public static string LETTERS_DIGITS = LETTERS + DIGITS;
 
     //tokens constants
     public static string TT_INT = "TT_INT";
     public static string TT_FLOAT = "TT_FLOAT";
+    public static string TT_IDENTIFIER = "TT_IDENTIFIER";
+    public static string TT_KEYWORD = "TT_KEYWORD";
     public static string TT_PLUS = "TT_PLUS";
     public static string TT_MINUS = "TT_MINUS";
     public static string TT_MUL = "TT_MUL";
     public static string TT_DIV = "TT_DIV";
+    public static string TT_POW = "TT_POW";
+    public static string TT_EQ = "TT_EQ";
     public static string TT_LPAREN = "TT_LPAREN";
     public static string TT_RPAREN = "TT_RPAREN";
     public static string TT_EOF = "TT_EOF";
+
+
+    public static string[] KEYWORDS = { "VAR" };
 
 
 
@@ -145,6 +155,23 @@ public class UnaryOpNode : Node
 }
 
 
+public class VarAssignNode : Node//TODO: rest
+{
+    public Node node;
+
+    public VarAssignNode(Token op_tok, Node node) : base(op_tok)
+    {
+        this.node = node;
+
+        this.PosStart = op_tok.posStart;
+        this.PosEnd = node.PosEnd;
+    }
+
+    public override string ToString() => $"({tok}, {node})";
+}
+
+
+
 //parse result----------------------------------------------------
 
 class ParseResult
@@ -210,7 +237,7 @@ class Parser
     public ParseResult parse()
     {
         ParseResult res = expr();
-        if(res.error == null && this.current_tok.type != MainScript.TT_EOF)
+        if (res.error == null && this.current_tok.type != MainScript.TT_EOF)
         {
             return res.failure(new InvalidSyntaxError(
                 this.current_tok.posStart,
@@ -220,32 +247,22 @@ class Parser
         return res;
     }
 
-
-    ParseResult factor()
-    {
+    ParseResult atom(){
         ParseResult res = new ParseResult();
         Token tok = current_tok;
 
-        if( tok.type == MainScript.TT_MINUS || tok.type == MainScript.TT_PLUS)
-        {
-            res.register(advance());
-            Node factorTemp = res.register(factor());
-            if (res.error != null)
-                return res;
-            return res.success(new UnaryOpNode(tok, factorTemp));
-
-        }
-        else if (MainScript.TT_INT == tok.type || MainScript.TT_FLOAT == tok.type)
+        if (MainScript.TT_INT == tok.type || MainScript.TT_FLOAT == tok.type)
         {
             res.register(advance());//might be a problem...
             return res.success(new NumberNode(tok));
-        } else if( tok.type == MainScript.TT_LPAREN)
+        }
+        else if (tok.type == MainScript.TT_LPAREN)
         {
             res.register(advance());
             Node exprTemp = res.register(expr());
             if (res.error != null)
                 return res;
-            if(current_tok.type == MainScript.TT_RPAREN)
+            if (current_tok.type == MainScript.TT_RPAREN)
             {
                 res.register(advance());
                 return res.success(exprTemp);
@@ -264,41 +281,97 @@ class Parser
             new InvalidSyntaxError(
                 tok.posStart,
                 tok.posEnd,
-                "Expected int or float"));
+                "Expected int, float, \"+\", \"-\" or \"(\""));
+
+
+    }
+
+    ParseResult factor()
+    {
+        ParseResult res = new ParseResult();
+        Token tok = current_tok;
+
+        if( tok.type == MainScript.TT_MINUS || tok.type == MainScript.TT_PLUS)
+        {
+            res.register(advance());
+            Node factorTemp = res.register(factor());
+            if (res.error != null)
+                return res;
+            return res.success(new UnaryOpNode(tok, factorTemp));
+
+        }
+
+        return Power();
+    }
+
+    private ParseResult Power()
+    {
+        return binOp(atom, new string[] {MainScript.TT_POW },factor);
     }
 
     ParseResult term()
     {
-        ParseResult res = new ParseResult();
-        Node left = res.register(factor());
-        if (res.error != null)
-            return res;
-
-        while (current_tok.type == MainScript.TT_MUL || current_tok.type == MainScript.TT_DIV)
-        {
-            Token op_tok = current_tok;
-            res.register(advance());
-            Node right = res.register(factor());
-            if (res.error != null)
-                return res;
-            left = new BinOpNode(left, op_tok, right);
-        }
-        return res.success(left);
+        return binOp(factor, new string[] { MainScript.TT_MUL, MainScript.TT_DIV });
     }
 
     ParseResult expr()
     {
+        // Holds result
         ParseResult res = new ParseResult();
-        Node left = res.register(term());
-        if (res.error != null)
+
+        // finds keyword values like VAR
+        if (current_tok.Matches(MainScript.TT_KEYWORD, "VAR")) {
+            res.register(advance());
+
+            // If token next to KEYWORD is not identifier throw an error
+            if (current_tok.type != MainScript.TT_IDENTIFIER)
+                return res.failure(
+                    new InvalidSyntaxError(
+                        current_tok.posStart,
+                        current_tok.posEnd,
+                        "Expected Identifier"));
+
+            Token varName = current_tok;
+            res.register(advance());
+
+            // If token next to IDENTIFIER is not "=" throw an error
+            if (current_tok.type != MainScript.TT_EQ)
+                return res.failure(
+                    new InvalidSyntaxError(
+                        current_tok.posStart,
+                        current_tok.posEnd,
+                        "Expected \"=\""));
+
+            res.register(advance());
+
+            // Registers the expresion right next to the "="
+            Node exTemp = res.register(this.expr());
+            if (res.error != null)// ERROR check
+                return res;
+            return res.success(new VarAssignNode(varName, exTemp));
+        }
+
+
+        return binOp(term, new string[]{ MainScript.TT_PLUS, MainScript.TT_MINUS });
+    }
+
+
+    ParseResult binOp(Func<ParseResult> funcA, string[] ops, Func<ParseResult> funcB = null)
+    {
+        if (funcB == null)
+            funcB = funcA;
+
+        ParseResult res = new ParseResult();
+        Node left = res.register(funcA());// Find left node
+        if (res.error != null)// ERROR check
             return res;
 
-        while (current_tok.type == MainScript.TT_PLUS || current_tok.type == MainScript.TT_MINUS)
+        while (ops.Any(x => x == current_tok.type))
         {
             Token op_tok = current_tok;
             res.register(advance());
-            Node right = res.register(term());
-            if (res.error != null)
+            Node right = res.register(funcB());// Finds right node
+            if (res.error != null)// ERROR check
                 return res;
             left = new BinOpNode(left, op_tok, right);
         }
@@ -433,6 +506,14 @@ public class Lexer
                         tokens.Add(new Token(MainScript.TT_DIV, posStart: this.pos));
                         advance();
                         break;
+                    case '^':
+                        tokens.Add(new Token(MainScript.TT_POW, posStart: this.pos));
+                        advance();
+                        break;
+                    case '=':
+                        tokens.Add(new Token(MainScript.TT_EQ, posStart: this.pos));
+                        advance();
+                        break;
                     case '(':
                         tokens.Add(new Token(MainScript.TT_LPAREN, posStart: this.pos));
                         advance();
@@ -442,11 +523,11 @@ public class Lexer
                         advance();
                         break;
                     default:
-                        if (MainScript.DIGITS.Contains((char)current_char))
-                        {
+                        if (MainScript.DIGITS.Contains((char)current_char)){
                             tokens.Add(make_number());
-                        }
-                        else
+                        } else if (MainScript.LETTERS.Contains((char)current_char)){
+                            tokens.Add(MakeIdentifier());
+                        } else
                         {
                             Position pos_start = pos.copy();
                             char tempChar = (char)current_char;
@@ -464,8 +545,25 @@ public class Lexer
         return (tokens, null);
     }
 
+    private Token MakeIdentifier()
+    {
+        string idStr = "";
+        Position posStart = pos.copy();
 
+        while (current_char != null && MainScript.LETTERS_DIGITS.Contains((char)current_char)) {
+            idStr += current_char;
+            advance();
+        }
+        //TODO: keywords. cointain idStr
+        string tokType;
+        if (MainScript.KEYWORDS.Any(x => x == idStr))
+            tokType = MainScript.TT_KEYWORD;
+        else
+            tokType = MainScript.TT_IDENTIFIER;
 
+        return new Token(tokType, idStr, posStart, pos);
+
+    }
 }
 
 
@@ -475,11 +573,11 @@ public class Lexer
 public class Token
 {
     public string type;
-    public float? value;
+    public object value;
     public Position posStart;
     public Position posEnd;
 
-    public Token(string type, float? value = null, Position posStart = null, Position posEnd = null)
+    public Token(string type, object value = null, Position posStart = null, Position posEnd = null)
     {
         this.type = type;
         this.value = value;//temporary fix
@@ -501,6 +599,10 @@ public class Token
         return type;
     }
 
+    internal bool Matches(string type, string value)
+    {
+        return (this.type == type && this.value.ToString() == value);
+    }
 }
 
 
@@ -513,9 +615,9 @@ public class Number
     Position PosEnd;
     public Context Context;
 
-    public Number(float? value)
+    public Number(object value)
     {
-        this.Value = value;
+        this.Value = float.Parse(value.ToString());
         SetPos();
     }
 
@@ -542,6 +644,11 @@ public class Number
         return (new Number(Value / other.Value).setContext(this.Context), null);
     }
 
+    internal (Number, CustomError) PoweredBy(Number right)
+    {
+        return (new Number(MathF.Pow((float)Value, (float)right.Value)).setContext(this.Context), null);
+    }
+
     public override string ToString()
     {
         return Value.ToString();
@@ -552,6 +659,7 @@ public class Number
         this.Context = context;
         return this;
     }
+
 }
 
 
@@ -622,6 +730,8 @@ class Interpreter
             result = left.MultedBy(right);
         if (node.tok.type == MainScript.TT_DIV)
             result = left.DivBy(right);
+        if (node.tok.type == MainScript.TT_POW)
+            result = left.PoweredBy(right);
 
         if (result.Item2 != null)
             return res.failure(result.Item2);
