@@ -7,6 +7,9 @@ using System.Linq;
 
 public static class MainScript
 {
+    //Global symbol table
+    public static SymbolTable GlobalSymbolTable = new SymbolTable(); //not setting null to 0
+
     //digit constants
     public static string DIGITS = "0123456789";
     public static string LETTERS = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz_";
@@ -39,7 +42,7 @@ public static class MainScript
         Lexer lexer = new Lexer(fn, text);
         (List<Token>, CustomError) tokensAndError = lexer.make_tokens();
         List<Token> tokens = tokensAndError.Item1;
-        //Console.WriteLine(tokens.ToDelimitedString()); //debug
+        Console.WriteLine(tokens.ToDelimitedString()); //debug
         CustomError error = tokensAndError.Item2;
         if (error != null)
             return (null, error);
@@ -53,6 +56,7 @@ public static class MainScript
         // Run program
         Interpreter interpreter = new Interpreter();
         Context context = new Context("<Program>");
+        context.symbolTable = GlobalSymbolTable;
         RTResult result = interpreter.Visit(ast.node, context);
 
 
@@ -157,17 +161,32 @@ public class UnaryOpNode : Node
 
 public class VarAssignNode : Node//TODO: rest
 {
-    public Node node;
+    public Node ValueNode;
+    public Token VarNameTok;
 
-    public VarAssignNode(Token op_tok, Node node) : base(op_tok)
+    public VarAssignNode(Token varNameTok, Node valueNode) : base(varNameTok)
     {
-        this.node = node;
+        this.VarNameTok = varNameTok;
+        this.ValueNode = valueNode;
 
-        this.PosStart = op_tok.posStart;
-        this.PosEnd = node.PosEnd;
+        this.PosStart = varNameTok.posStart;
+        this.PosEnd = valueNode.PosEnd;
     }
 
-    public override string ToString() => $"({tok}, {node})";
+    //public override string ToString() => $"({tok}, {node})";
+}
+
+public class VarAccessNode : Node//TODO: rest
+{
+    public Token VarNameTok;
+
+    public VarAccessNode(Token varNameTok) : base(varNameTok)
+    {
+        this.PosStart = varNameTok.posStart;
+        this.PosEnd = varNameTok.posEnd;
+    }
+
+    //public override string ToString() => $"({tok}, {node})";
 }
 
 
@@ -256,6 +275,11 @@ class Parser
             res.register(advance());//might be a problem...
             return res.success(new NumberNode(tok));
         }
+        else if (tok.type == MainScript.TT_IDENTIFIER)
+        {
+            res.register(advance());
+            return res.success(new VarAccessNode(tok));
+        }
         else if (tok.type == MainScript.TT_LPAREN)
         {
             res.register(advance());
@@ -304,15 +328,9 @@ class Parser
         return Power();
     }
 
-    private ParseResult Power()
-    {
-        return binOp(atom, new string[] {MainScript.TT_POW },factor);
-    }
+    ParseResult Power() => binOp(atom, new string[] {MainScript.TT_POW },factor);
 
-    ParseResult term()
-    {
-        return binOp(factor, new string[] { MainScript.TT_MUL, MainScript.TT_DIV });
-    }
+    ParseResult term() => binOp(factor, new string[] { MainScript.TT_MUL, MainScript.TT_DIV });
 
     ParseResult expr()
     {
@@ -673,6 +691,7 @@ public class Context
     public string displayName;
     public Context parent;
     public Position parentEtrPos;
+    public SymbolTable symbolTable;
 
     public Context(string displayName, Context parent = null, Position parentEtrPos = null)
     {
@@ -681,6 +700,49 @@ public class Context
         this.parentEtrPos = parentEtrPos;
     }
 }
+
+//SYMBOL Table
+//###################################################
+public class SymbolTable {
+    Dictionary<string, Number> Symbols = new Dictionary<string, Number>();
+    SymbolTable Parent;
+
+    //Finds the variable in Symbols tree
+    public Number get(string name)
+    {
+        if (!Symbols.ContainsKey(name) && Parent != null)
+        {
+            return Parent.get(name);
+        }else if(!Symbols.ContainsKey(name) && Parent == null)
+        {
+            return null;
+        }
+
+        return Symbols[name];
+    }
+
+    public void Set(string name, Number value)
+    {
+        if (!Symbols.ContainsKey(name))
+            Symbols.Add(name, value);
+        else
+            Symbols[name] = value;
+    }
+
+    public void Remove(string name)
+    {
+        if (Symbols.ContainsKey(name))
+        {
+            Symbols.Remove(name);
+        }
+
+    }
+
+
+
+
+}
+
 
 
 
@@ -696,12 +758,52 @@ class Interpreter
         Type thisType = this.GetType();
         MethodInfo theMethod = thisType.GetMethod(method_name);
         object[] para = { node, context };
+
+        if(theMethod == null)
+        {
+            NoVisitMethod(node, context);
+            return null;
+        }
+
         return (RTResult)theMethod.Invoke(this, para);
+
     }
     public void NoVisitMethod(Node node, Context context)
     {
         throw new Exception($"No Visit_{node.GetType().Name} method defined");
     }
+
+    public RTResult Visit_VarAccessNode(Node node, Context context)
+    {
+        RTResult res = new RTResult();
+
+        string varName = node.tok.value.ToString();
+        Number value = context.symbolTable.get(varName);
+
+        if (value == null)
+        {
+           return res.failure(new RTError(node.PosStart, node.PosEnd, $"{varName} is not defined", context));
+        }
+
+        return res.success(value);
+    }
+
+    public RTResult Visit_VarAssignNode(Node node, Context context)
+    {
+        RTResult res = new RTResult();
+        VarAssignNode varAssignNode = (VarAssignNode)node;
+
+        Console.WriteLine(varAssignNode.VarNameTok.ToString());
+
+        string varName = varAssignNode.VarNameTok.value.ToString();
+        Number value = res.register(Visit(varAssignNode.ValueNode, context));
+
+        if (res.error != null)
+            return res;
+        context.symbolTable.Set(varName, value);
+        return res.success(value);
+    }
+
 
     public RTResult Visit_NumberNode(NumberNode node, Context context)
     {
