@@ -28,10 +28,20 @@ public static class MainScript
     public static string TT_EQ = "TT_EQ";
     public static string TT_LPAREN = "TT_LPAREN";
     public static string TT_RPAREN = "TT_RPAREN";
+    public static string TT_EE = "TT_EE";
+    public static string TT_NE = "TT_NE";
+    public static string TT_LT = "TT_LT";
+    public static string TT_GT = "TT_GT";
+    public static string TT_LTE = "TT_LTE";
+    public static string TT_GTE = "TT_GTE";
     public static string TT_EOF = "TT_EOF";
 
 
-    public static string[] KEYWORDS = { "VAR" };
+    public static string[] KEYWORDS = 
+        {   "VAR",
+            "AND",
+            "OR",
+            "NOT"};
 
 
 
@@ -197,31 +207,29 @@ class ParseResult
 {
     public CustomError error;
     public Node node;
+    public int advanceCount = 0;
 
-    public ParseResult(){
+
+    public void registerAdvancement()
+    {
+        advanceCount++;
     }
 
-    public Node register(object res) {
-        if(res is ParseResult)
-        {
-            ParseResult parRes = (ParseResult)res;
-            if(parRes.error != null)
-                error = parRes.error;
-            return parRes.node;
-        }
-        if(res is Node)
-        {
-            Node node = (Node)res;
-            return node;//might be a problem
-        }
-        return null;
+    public Node register(ParseResult res) {
+        advanceCount += res.advanceCount;
+        if (res.error != null)
+            this.error = res.error;
+        return res.node;
     }
+
+
     public ParseResult success(Node node) {
         this.node = node;
         return this;
     }
     public ParseResult failure(CustomError error) {
-        this.error = error;
+        if(this.error == null || this.advanceCount == 0) 
+            this.error = error;
         return this;
     }
 
@@ -272,23 +280,27 @@ class Parser
 
         if (MainScript.TT_INT == tok.type || MainScript.TT_FLOAT == tok.type)
         {
-            res.register(advance());//might be a problem...
+            res.registerAdvancement();
+            advance();
             return res.success(new NumberNode(tok));
         }
         else if (tok.type == MainScript.TT_IDENTIFIER)
         {
-            res.register(advance());
+            res.registerAdvancement();
+            advance();
             return res.success(new VarAccessNode(tok));
         }
         else if (tok.type == MainScript.TT_LPAREN)
         {
-            res.register(advance());
+            res.registerAdvancement();
+            advance();
             Node exprTemp = res.register(expr());
             if (res.error != null)
                 return res;
             if (current_tok.type == MainScript.TT_RPAREN)
             {
-                res.register(advance());
+                res.registerAdvancement();
+                advance();
                 return res.success(exprTemp);
             }
             else
@@ -305,7 +317,7 @@ class Parser
             new InvalidSyntaxError(
                 tok.posStart,
                 tok.posEnd,
-                "Expected int, float, \"+\", \"-\" or \"(\""));
+                "Expected int, float, identifier, \"+\", \"-\" or \"(\""));
 
 
     }
@@ -317,7 +329,8 @@ class Parser
 
         if( tok.type == MainScript.TT_MINUS || tok.type == MainScript.TT_PLUS)
         {
-            res.register(advance());
+            res.registerAdvancement();
+            advance();
             Node factorTemp = res.register(factor());
             if (res.error != null)
                 return res;
@@ -338,8 +351,10 @@ class Parser
         ParseResult res = new ParseResult();
 
         // finds keyword values like VAR
-        if (current_tok.Matches(MainScript.TT_KEYWORD, "VAR")) {
-            res.register(advance());
+        if (current_tok.Matches(MainScript.TT_KEYWORD, "VAR"))
+        {
+            res.registerAdvancement();
+            advance();
 
             // If token next to KEYWORD is not identifier throw an error
             if (current_tok.type != MainScript.TT_IDENTIFIER)
@@ -350,7 +365,8 @@ class Parser
                         "Expected Identifier"));
 
             Token varName = current_tok;
-            res.register(advance());
+            res.registerAdvancement();
+            advance();
 
             // If token next to IDENTIFIER is not "=" throw an error
             if (current_tok.type != MainScript.TT_EQ)
@@ -360,17 +376,25 @@ class Parser
                         current_tok.posEnd,
                         "Expected \"=\""));
 
-            res.register(advance());
+            res.registerAdvancement();
+            advance();
 
             // Registers the expresion right next to the "="
             Node exTemp = res.register(this.expr());
             if (res.error != null)// ERROR check
                 return res;
+
             return res.success(new VarAssignNode(varName, exTemp));
         }
+        
 
+        Node node = res.register(binOp(term, new string[] { MainScript.TT_PLUS, MainScript.TT_MINUS }));
+        if (res.error != null)
+            return res.failure(new InvalidSyntaxError(
+                current_tok.posStart, current_tok.posEnd,
+                "Expected 'VAR', int, float, identifier, '+', '-', or '('"));
 
-        return binOp(term, new string[]{ MainScript.TT_PLUS, MainScript.TT_MINUS });
+        return res.success(node);
     }
 
 
@@ -387,7 +411,8 @@ class Parser
         while (ops.Any(x => x == current_tok.type))
         {
             Token op_tok = current_tok;
-            res.register(advance());
+            res.registerAdvancement();
+            advance();
             Node right = res.register(funcB());// Finds right node
             if (res.error != null)// ERROR check
                 return res;
@@ -639,6 +664,16 @@ public class Number
         SetPos();
     }
 
+    public Number(float? value, Position posStart, Position posEnd, Context context)
+    {
+
+        this.Value = value;
+        this.PosStart = posStart;
+        this.PosEnd = posEnd;
+        this.Context = context;
+    }
+
+
     public Number SetPos(Position posStart = null, Position posEnd = null){
         this.PosStart = posStart;
         this.PosEnd = posEnd;
@@ -666,6 +701,12 @@ public class Number
     {
         return (new Number(MathF.Pow((float)Value, (float)right.Value)).setContext(this.Context), null);
     }
+
+    public Number Copy()
+    {
+        return new Number(this.Value, PosStart, PosEnd, this.Context);
+    }
+
 
     public override string ToString()
     {
@@ -784,6 +825,8 @@ class Interpreter
         {
            return res.failure(new RTError(node.PosStart, node.PosEnd, $"{varName} is not defined", context));
         }
+
+        value = value.Copy().SetPos(node.PosStart, node.PosEnd);
 
         return res.success(value);
     }
