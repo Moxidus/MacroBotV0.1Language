@@ -21,12 +21,12 @@ namespace MacroBotV0._1Language
 
                 (Number, CustomError) tokensAndError = MainScript.Run("<TestFileName>" ,txt);
                 CustomError error = tokensAndError.Item2;
-                Number number = tokensAndError.Item1;
+                Number result = tokensAndError.Item1;
 
                 if (error != null)
                     Console.WriteLine(error);
-                else
-                    Console.WriteLine(number.ToString());
+                else if(result != null)
+                    Console.WriteLine(result.ToString());
             }
         }
     }

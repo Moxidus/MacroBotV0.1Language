@@ -16,43 +16,56 @@ public static class MainScript
     public static string LETTERS_DIGITS = LETTERS + DIGITS;
 
     //tokens constants
-    public static string TT_INT = "TT_INT";
-    public static string TT_FLOAT = "TT_FLOAT";
-    public static string TT_IDENTIFIER = "TT_IDENTIFIER";
-    public static string TT_KEYWORD = "TT_KEYWORD";
-    public static string TT_PLUS = "TT_PLUS";
-    public static string TT_MINUS = "TT_MINUS";
-    public static string TT_MUL = "TT_MUL";
-    public static string TT_DIV = "TT_DIV";
-    public static string TT_POW = "TT_POW";
-    public static string TT_EQ = "TT_EQ";
-    public static string TT_LPAREN = "TT_LPAREN";
-    public static string TT_RPAREN = "TT_RPAREN";
-    public static string TT_EE = "TT_EE";
-    public static string TT_NE = "TT_NE";
-    public static string TT_LT = "TT_LT";
-    public static string TT_GT = "TT_GT";
-    public static string TT_LTE = "TT_LTE";
-    public static string TT_GTE = "TT_GTE";
-    public static string TT_EOF = "TT_EOF";
+    public const string TT_INT = "TT_INT";
+    public const string TT_FLOAT = "TT_FLOAT";
+    public const string TT_IDENTIFIER = "TT_IDENTIFIER";
+    public const string TT_KEYWORD = "TT_KEYWORD";
+    public const string TT_PLUS = "TT_PLUS";
+    public const string TT_MINUS = "TT_MINUS";
+    public const string TT_MUL = "TT_MUL";
+    public const string TT_DIV = "TT_DIV";
+    public const string TT_POW = "TT_POW";
+    public const string TT_EQ = "TT_EQ";
+    public const string TT_LPAREN = "TT_LPAREN";
+    public const string TT_RPAREN = "TT_RPAREN";
+    public const string TT_EE = "TT_EE";
+    public const string TT_NE = "TT_NE";
+    public const string TT_LT = "TT_LT";
+    public const string TT_GT = "TT_GT";
+    public const string TT_LTE = "TT_LTE";
+    public const string TT_GTE = "TT_GTE";
+    public const string TT_EOF = "TT_EOF";
 
 
-    public static string[] KEYWORDS = 
-        {   "VAR",
-            "AND",
-            "OR",
-            "NOT"};
+    public static string[] KEYWORDS =
+    {
+        "VAR",
+        "AND",
+        "OR",
+        "NOT",
+        "IF",
+        "THEN",
+        "ELIF",
+        "ELSE"
+    };
 
 
 
     //Run-------------------------------------------------------------
     public static (Number, CustomError) Run(string fn, string text)
     {
+        //setting global VARIABLES
+        GlobalSymbolTable.Set("NULL", new Number(0));
+        GlobalSymbolTable.Set("TRUE", new Number(1));
+        GlobalSymbolTable.Set("FALSE", new Number(0));
+
+
+
         //generate tokens
         Lexer lexer = new Lexer(fn, text);
         (List<Token>, CustomError) tokensAndError = lexer.make_tokens();
         List<Token> tokens = tokensAndError.Item1;
-        Console.WriteLine(tokens.ToDelimitedString()); //debug
+        Console.WriteLine(tokens.ToDelimitedString()); //debug draw tokens
         CustomError error = tokensAndError.Item2;
         if (error != null)
             return (null, error);
@@ -62,6 +75,7 @@ public static class MainScript
         ParseResult ast = parser.parse();
         if (ast.error != null)
             return (null, ast.error);
+
 
         // Run program
         Interpreter interpreter = new Interpreter();
@@ -108,7 +122,6 @@ class RTResult
 
 
 //Nodes------------------------------------------------------------
-
 public class Node
 {
     public Token tok;
@@ -123,8 +136,6 @@ public class Node
     public override string ToString() => tok.ToString();
 
 }
-
-
 public class NumberNode : Node
 {
     public NumberNode(Token tok) : base(tok)
@@ -136,7 +147,6 @@ public class NumberNode : Node
     public override string ToString() => tok.ToString();
 
 }
-
 public class BinOpNode : Node
 {
     public Node left_node;
@@ -152,7 +162,6 @@ public class BinOpNode : Node
 
     public override string ToString() => $"({left_node}, {tok}, {right_node})";
 }
-
 public class UnaryOpNode : Node
 {
     public Node node;
@@ -167,9 +176,7 @@ public class UnaryOpNode : Node
 
     public override string ToString() => $"({tok}, {node})";
 }
-
-
-public class VarAssignNode : Node//TODO: rest
+public class VarAssignNode : Node
 {
     public Node ValueNode;
     public Token VarNameTok;
@@ -185,7 +192,6 @@ public class VarAssignNode : Node//TODO: rest
 
     //public override string ToString() => $"({tok}, {node})";
 }
-
 public class VarAccessNode : Node//TODO: rest
 {
     public Token VarNameTok;
@@ -198,11 +204,24 @@ public class VarAccessNode : Node//TODO: rest
 
     //public override string ToString() => $"({tok}, {node})";
 }
+public class VarIfThenNode : Node
+{
+    public List<(Node, Node)> cases;
+    public Node elseCase;
 
+    public VarIfThenNode(List<(Node, Node)> cases, Node elseCase): base(null)
+    {
+        this.cases = cases;
+        this.elseCase = elseCase;
 
+        PosStart = cases[0].Item1.PosStart;
+        PosEnd = elseCase != null ? elseCase.PosEnd : cases[cases.Count - 1].Item2.PosEnd;
+    }
+
+    //public override string ToString() => $"({tok}, {node})";
+}
 
 //parse result----------------------------------------------------
-
 class ParseResult
 {
     public CustomError error;
@@ -311,6 +330,13 @@ class Parser
                     "Expected ')'"));
             }
         }
+        else if (current_tok.Matches(MainScript.TT_KEYWORD, "IF"))//checks for if expresions
+        {
+            Node ifExprtemp = res.register(ifExpr());
+            if (res.error != null)// ERROR check
+                return res;
+            return res.success(ifExprtemp);
+        }
 
 
         return res.failure(
@@ -320,6 +346,79 @@ class Parser
                 "Expected int, float, identifier, \"+\", \"-\" or \"(\""));
 
 
+    }
+
+    private ParseResult ifExpr()
+    {
+        ParseResult res = new ParseResult();
+        List<(Node, Node)> cases = new List<(Node, Node)>();
+        Node elseCase = null;
+
+        //Position posStart = current_tok.posStart.copy();
+        res.registerAdvancement();
+        advance();
+
+        // Registers the expresion right next to the "IF"
+        Node condition = res.register(this.expr());
+        if (res.error != null)// ERROR check
+            return res;
+
+        // If token next to expresion is not "THEN" throw an error
+        if (!current_tok.Matches(MainScript.TT_KEYWORD, "THEN"))
+            return res.failure(
+                new InvalidSyntaxError(
+                    current_tok.posStart,
+                    current_tok.posEnd,
+                    "Expected \"THEN\""));
+
+        res.registerAdvancement();
+        advance();
+
+        // Registers the expresion right next to the "THEN"
+        Node exprTemp = res.register(this.expr());
+        if (res.error != null)// ERROR check
+            return res;
+        cases.Add((condition, exprTemp));
+
+        while(current_tok.Matches(MainScript.TT_KEYWORD, "ELIF"))
+        {
+            res.registerAdvancement();
+            advance();
+
+            condition = res.register(expr());
+            if (res.error != null)// ERROR check
+                return res;
+
+            if (!current_tok.Matches(MainScript.TT_KEYWORD, "THEN"))
+                return res.failure(
+                    new InvalidSyntaxError(
+                        current_tok.posStart,
+                        current_tok.posEnd,
+                        "Expected \"THEN\""));
+
+            res.registerAdvancement();
+            advance();
+
+            exprTemp = res.register(expr());
+            if (res.error != null)// ERROR check
+                return res;
+
+            cases.Add((condition, exprTemp));
+        }
+
+        if(current_tok.Matches(MainScript.TT_KEYWORD, "ELSE"))
+        {
+
+            res.registerAdvancement();
+            advance();
+
+            exprTemp = res.register(expr());
+            if (res.error != null)// ERROR check
+                return res;
+            elseCase = exprTemp;
+        }
+
+        return res.success(new VarIfThenNode(cases, elseCase));
     }
 
     ParseResult factor()
@@ -341,9 +440,9 @@ class Parser
         return Power();
     }
 
-    ParseResult Power() => binOp(atom, new string[] {MainScript.TT_POW },factor);
+    ParseResult Power() => binOp(atom, new(string, string)[] { (MainScript.TT_POW, null) },factor);
 
-    ParseResult term() => binOp(factor, new string[] { MainScript.TT_MUL, MainScript.TT_DIV });
+    ParseResult term() => binOp(factor, new (string, string)[] { (MainScript.TT_MUL, null), (MainScript.TT_DIV, null) });
 
     ParseResult expr()
     {
@@ -386,9 +485,8 @@ class Parser
 
             return res.success(new VarAssignNode(varName, exTemp));
         }
-        
 
-        Node node = res.register(binOp(term, new string[] { MainScript.TT_PLUS, MainScript.TT_MINUS }));
+        Node node = res.register(binOp(compExpr, new (string, string)[] { (MainScript.TT_KEYWORD, "AND"), (MainScript.TT_KEYWORD, "OR") }));
         if (res.error != null)
             return res.failure(new InvalidSyntaxError(
                 current_tok.posStart, current_tok.posEnd,
@@ -397,8 +495,41 @@ class Parser
         return res.success(node);
     }
 
+    private ParseResult compExpr()
+    {
+        ParseResult res = new ParseResult();
 
-    ParseResult binOp(Func<ParseResult> funcA, string[] ops, Func<ParseResult> funcB = null)
+        if(current_tok.Matches(MainScript.TT_KEYWORD, "NOT"))
+        {
+            Token opTok = current_tok;
+            res.registerAdvancement();
+            advance();
+
+            Node nodeNot = res.register(compExpr());
+            if (res.error != null)
+                return res;
+            return res.success(new UnaryOpNode(opTok, nodeNot));
+        }
+
+        Node node = res.register(binOp(arithExpr, new (string, string)[] {(MainScript.TT_EE, null), (MainScript.TT_NE, null), (MainScript.TT_LT, null), (MainScript.TT_GT, null), (MainScript.TT_GTE, null), (MainScript.TT_LTE, null) }));
+
+        if (res.error != null)
+            return res.failure(
+                new InvalidSyntaxError(
+                    node.PosStart,
+                    node.PosEnd,
+                    "Expected int, float, identifier, '+', '-', '(' or ''"));
+
+        return res.success(node);
+
+    }
+
+    private ParseResult arithExpr()
+    {
+        return binOp(term, new (string, string)[] { (MainScript.TT_PLUS, null), (MainScript.TT_MINUS, null) });
+    }
+
+    ParseResult binOp(Func<ParseResult> funcA, (string, string)[] ops, Func<ParseResult> funcB = null)
     {
         if (funcB == null)
             funcB = funcA;
@@ -408,7 +539,8 @@ class Parser
         if (res.error != null)// ERROR check
             return res;
 
-        while (ops.Any(x => x == current_tok.type))
+        while (ops.Any(x => x.Item1 == current_tok.type && current_tok.value == null) ||
+               ops.Any(x => x.Item1 == current_tok.type && x.Item2 == current_tok.value.ToString()))
         {
             Token op_tok = current_tok;
             res.registerAdvancement();
@@ -553,10 +685,6 @@ public class Lexer
                         tokens.Add(new Token(MainScript.TT_POW, posStart: this.pos));
                         advance();
                         break;
-                    case '=':
-                        tokens.Add(new Token(MainScript.TT_EQ, posStart: this.pos));
-                        advance();
-                        break;
                     case '(':
                         tokens.Add(new Token(MainScript.TT_LPAREN, posStart: this.pos));
                         advance();
@@ -564,6 +692,21 @@ public class Lexer
                     case ')':
                         tokens.Add(new Token(MainScript.TT_RPAREN, posStart: this.pos));
                         advance();
+                        break;
+                    case '!':
+                        (Token, CustomError) tokNError = makeNotEquals();
+                        if (tokNError.Item2 != null)
+                            return (null, tokNError.Item2);
+                        tokens.Add(tokNError.Item1);
+                        break;
+                    case '=':
+                        tokens.Add(makeEquals());
+                        break;
+                    case '<':
+                        tokens.Add(makeLessThen());
+                        break;
+                    case '>':
+                        tokens.Add(makeGreaterThen());
                         break;
                     default:
                         if (MainScript.DIGITS.Contains((char)current_char)){
@@ -586,6 +729,67 @@ public class Lexer
 
         tokens.Add(new Token(MainScript.TT_EOF, posStart: this.pos));
         return (tokens, null);
+    }
+
+    private Token makeGreaterThen()
+    {
+        string tokenType = MainScript.TT_GT;
+        Position posStart = this.pos.copy();
+        advance();
+
+        if (current_char == '=')
+        {
+            advance();
+            tokenType = MainScript.TT_GTE;
+        }
+
+        return new Token(tokenType, posStart: posStart, posEnd: pos);
+    }
+
+    private Token makeLessThen()
+    {
+        string tokenType = MainScript.TT_LT;
+        Position posStart = this.pos.copy();
+        advance();
+
+        if (current_char == '=')
+        {
+            advance();
+            tokenType = MainScript.TT_LTE;
+        }
+
+        return new Token(tokenType, posStart: posStart, posEnd: pos);
+    }
+
+    private Token makeEquals()
+    {
+        string tokenType = MainScript.TT_EQ;
+        Position posStart = this.pos.copy();
+        advance();
+
+        if (current_char == '=')
+        {
+            advance();
+            tokenType = MainScript.TT_EE;
+        }
+
+        return new Token(tokenType, posStart: posStart, posEnd: pos);
+    }
+
+
+    private (Token, CustomError) makeNotEquals()
+    {
+        Position posStart = this.pos.copy();
+        advance();
+
+        if(current_char == '=')
+        {
+            advance();
+            return (new Token(MainScript.TT_NE, posStart, pos), null);
+        }
+
+        advance();
+        return (null, new ExpectedCharError(posStart, pos, "'=' (after '!')"));
     }
 
     private Token MakeIdentifier()
@@ -719,6 +923,55 @@ public class Number
         return this;
     }
 
+    internal (Number, CustomError) GetComparisonEE(Number other)
+    {
+        return (new Number(Value == other.Value ? 1 : 0).setContext(Context), null);
+    }
+
+    internal (Number, CustomError) GetComparisonNE(Number other)
+    {
+        return (new Number(Value != other.Value ? 1 : 0).setContext(Context), null);
+    }
+
+    internal (Number, CustomError) GetComparisonLT(Number other)
+    {
+        return (new Number(Value < other.Value ? 1 : 0).setContext(Context), null);
+    }
+
+    internal (Number, CustomError) GetComparisonGT(Number other)
+    {
+        return (new Number(Value > other.Value ? 1 : 0).setContext(Context), null);
+    }
+
+    internal (Number, CustomError) GetComparisonLTE(Number other)
+    {
+        return (new Number(Value <= other.Value ? 1 : 0).setContext(Context), null);
+    }
+
+    internal (Number, CustomError) GetComparisonGTE(Number other)
+    {
+        return (new Number(Value >= other.Value ? 1 : 0).setContext(Context), null);
+    }
+
+    internal (Number, CustomError) AndedBy(Number other)
+    {
+        return (new Number(Value == 1 && other.Value == 1 ? 1 : 0).setContext(Context), null);
+    }
+
+    internal (Number, CustomError) OredBy(Number other)
+    {
+        return (new Number(Value == 1 || other.Value == 1 ? 1 : 0).setContext(Context), null);
+    }
+
+    internal (Number, CustomError) Notted()
+    {
+        return (new Number(Value == 0? 1 : 0), null);
+    }
+
+    internal bool isTrue()
+    {
+        return Value != 0;
+    }
 }
 
 
@@ -800,6 +1053,8 @@ class Interpreter
         MethodInfo theMethod = thisType.GetMethod(method_name);
         object[] para = { node, context };
 
+
+
         if(theMethod == null)
         {
             NoVisitMethod(node, context);
@@ -813,7 +1068,6 @@ class Interpreter
     {
         throw new Exception($"No Visit_{node.GetType().Name} method defined");
     }
-
     public RTResult Visit_VarAccessNode(Node node, Context context)
     {
         RTResult res = new RTResult();
@@ -830,7 +1084,6 @@ class Interpreter
 
         return res.success(value);
     }
-
     public RTResult Visit_VarAssignNode(Node node, Context context)
     {
         RTResult res = new RTResult();
@@ -846,8 +1099,6 @@ class Interpreter
         context.symbolTable.Set(varName, value);
         return res.success(value);
     }
-
-
     public RTResult Visit_NumberNode(NumberNode node, Context context)
     {
         return new RTResult().success(
@@ -867,16 +1118,28 @@ class Interpreter
 
         (Number, CustomError) result = (null, null);
 
-        if (node.tok.type == MainScript.TT_PLUS)
-            result = left.AddedTo(right);
-        if (node.tok.type == MainScript.TT_MINUS)
-            result = left.SubbedBy(right);
-        if (node.tok.type == MainScript.TT_MUL)
-            result = left.MultedBy(right);
-        if (node.tok.type == MainScript.TT_DIV)
-            result = left.DivBy(right);
-        if (node.tok.type == MainScript.TT_POW)
-            result = left.PoweredBy(right);
+        switch (node.tok.type)
+        {
+            case MainScript.TT_PLUS:    result = left.AddedTo(right); break;
+            case MainScript.TT_MINUS:   result = left.SubbedBy(right); break;
+            case MainScript.TT_MUL:     result = left.MultedBy(right); break;
+            case MainScript.TT_DIV:     result = left.DivBy(right); break;
+            case MainScript.TT_POW:     result = left.PoweredBy(right); break;
+            case MainScript.TT_EE:      result = left.GetComparisonEE(right); break;
+            case MainScript.TT_NE:      result = left.GetComparisonNE(right); break;
+            case MainScript.TT_LT:      result = left.GetComparisonLT(right); break;
+            case MainScript.TT_GT:      result = left.GetComparisonGT(right); break;
+            case MainScript.TT_LTE:      result = left.GetComparisonLTE(right); break;
+            case MainScript.TT_GTE:      result = left.GetComparisonGTE(right); break;
+            default:
+
+                if (node.tok.Matches(MainScript.TT_KEYWORD, "AND"))
+                    result = left.AndedBy(right);
+                else if(node.tok.Matches(MainScript.TT_KEYWORD, "OR"))
+                    result = left.OredBy(right);
+
+                break;
+        }
 
         if (result.Item2 != null)
             return res.failure(result.Item2);
@@ -899,12 +1162,43 @@ class Interpreter
 
         if (node.tok.type == MainScript.TT_MINUS)
             result = numb.MultedBy(new Number(-1));
+        else if (node.tok.Matches(MainScript.TT_KEYWORD, "NOT"))
+            result = numb.Notted();
 
 
         if (res.error != null)
             return res.failure(result.Item2);
         else
             return res.success(result.Item1.SetPos(node.PosStart, node.PosEnd));
+    }
+    public RTResult Visit_VarIfThenNode(VarIfThenNode node, Context context)
+    {
+        RTResult res = new RTResult();
+
+        foreach((Node, Node) conNExpr in node.cases)
+        {
+            Number conditionValue = res.register(Visit(conNExpr.Item1, context));
+            if (res.error != null)// ERROR check
+                return res;
+
+            if (conditionValue.isTrue())
+            {
+                Number exprVal = res.register(Visit(conNExpr.Item2, context));
+                if (res.error != null)// ERROR check
+                    return res;
+                return res.success(exprVal);
+
+            }
+        }
+        if (node.elseCase != null)
+        {
+            Number elseVal = res.register(Visit(node.elseCase, context));
+            if (res.error != null)// ERROR check
+                return res;
+            return res.success(elseVal);
+        }
+        return res.success(null);
+
     }
 
 

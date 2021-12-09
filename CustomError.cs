@@ -31,6 +31,16 @@ namespace MacroBotV0._1Language
         public IllegalCharError(Position pos_start, Position pos_end, string details) : base(pos_start, pos_end, "Illegal Character", details) { }
     }
 
+
+    public class ExpectedCharError : CustomError
+    {
+        public ExpectedCharError(Position pos_start, Position pos_end, string details) : base(pos_start, pos_end, "Expected Character", details) { }
+    }
+
+
+
+
+
     public class InvalidSyntaxError : CustomError
     {
         public InvalidSyntaxError(Position pos_start, Position pos_end, string details) : base(pos_start, pos_end, "Invalid Syntax", details) { }
