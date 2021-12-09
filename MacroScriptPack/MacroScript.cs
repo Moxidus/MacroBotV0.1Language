@@ -65,7 +65,7 @@ public static class MainScript
         Lexer lexer = new Lexer(fn, text);
         (List<Token>, CustomError) tokensAndError = lexer.make_tokens();
         List<Token> tokens = tokensAndError.Item1;
-        Console.WriteLine(tokens.ToDelimitedString()); //debug draw tokens
+        //Console.WriteLine(tokens.ToDelimitedString()); //debug draw tokens
         CustomError error = tokensAndError.Item2;
         if (error != null)
             return (null, error);
@@ -91,8 +91,9 @@ public static class MainScript
 }
 
 
-
-//RunTime Result--------------------------------------------------
+//#################################################################
+// RunTime Result
+//#################################################################
 class RTResult
 {
     public Number value;
@@ -121,7 +122,9 @@ class RTResult
 
 
 
-//Nodes------------------------------------------------------------
+//#################################################################
+// Nodes
+//#################################################################
 public class Node
 {
     public Token tok;
@@ -221,7 +224,9 @@ public class VarIfThenNode : Node
     //public override string ToString() => $"({tok}, {node})";
 }
 
-//parse result----------------------------------------------------
+//#################################################################
+// Parse result
+//#################################################################
 class ParseResult
 {
     public CustomError error;
@@ -255,7 +260,9 @@ class ParseResult
 }
 
 
-//Parser----------------------------------------------------------
+//#################################################################
+// Parser
+//#################################################################
 class Parser
 {
     List<Token> tokens;
@@ -556,8 +563,9 @@ class Parser
 
 }
 
-//Position------------------------------------------------------------
-
+//#################################################################
+// Position
+//#################################################################
 public class Position
 {
     public int idx;
@@ -597,9 +605,9 @@ public class Position
 
 
 
-
-//LEXER---------------------------------------------------------------
-
+//#################################################################
+// LEXER
+//#################################################################
 public class Lexer
 {
     string text;
@@ -815,8 +823,9 @@ public class Lexer
 
 
 
-//TOKENS--------------------------------------------------------------
-
+//#################################################################
+// TOKENS
+//#################################################################
 public class Token
 {
     public string type;
@@ -853,8 +862,10 @@ public class Token
 }
 
 
-//Values
-//###################################################
+
+//#################################################################
+// Values
+//#################################################################
 public class Number
 {
     public float? Value;
@@ -975,11 +986,9 @@ public class Number
 }
 
 
-
-//Context
-//###################################################
-
-
+//#################################################################
+// Context
+//#################################################################
 public class Context
 {
     public string displayName;
@@ -995,8 +1004,9 @@ public class Context
     }
 }
 
-//SYMBOL Table
-//###################################################
+//#################################################################
+// SYMBOL Table
+//#################################################################
 public class SymbolTable {
     Dictionary<string, Number> Symbols = new Dictionary<string, Number>();
     SymbolTable Parent;
@@ -1038,12 +1048,9 @@ public class SymbolTable {
 }
 
 
-
-
-
-//Interpreter
-//###################################################
-
+//#################################################################
+// Interpreter
+//#################################################################
 class Interpreter
 {
     public RTResult Visit(Node node, Context context) {
@@ -1200,6 +1207,4 @@ class Interpreter
         return res.success(null);
 
     }
-
-
 }
