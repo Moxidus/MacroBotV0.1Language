@@ -46,7 +46,11 @@ public static class MainScript
         "IF",
         "THEN",
         "ELIF",
-        "ELSE"
+        "ELSE",
+        "FOR",
+        "TO",
+        "STEP",
+        "WHILE"
     };
 
 
@@ -223,6 +227,40 @@ public class VarIfThenNode : Node
 
     //public override string ToString() => $"({tok}, {node})";
 }
+public class ForNode : Node
+{
+    public Node StartValue;
+    public Node EndValue;
+    public Node BodyVal;
+    public Node StepVal;
+    public ForNode(Token varName, Node startValue, Node endValue, Node bodyVal, Node stepVal) : base(varName)
+    {
+        this.StartValue = startValue;
+        this.EndValue = endValue;
+        this.BodyVal = bodyVal;
+        this.StepVal = stepVal;
+
+        this.PosStart = varName.posStart;
+        this.PosEnd = BodyVal.PosEnd;
+    }
+
+    //public override string ToString() => $"({tok}, {node})";
+}
+public class WhileNode : Node
+{
+    public Node Condition;
+    public Node BodyVal;
+    public WhileNode(Node condition, Node bodyVal) : base(null)
+    {
+        this.Condition = condition;
+        this.BodyVal = bodyVal;
+
+        this.PosStart = condition.PosStart;
+        this.PosEnd = BodyVal.PosEnd;
+    }
+
+    //public override string ToString() => $"({tok}, {node})";
+}
 
 //#################################################################
 // Parse result
@@ -344,6 +382,20 @@ class Parser
                 return res;
             return res.success(ifExprtemp);
         }
+        else if (current_tok.Matches(MainScript.TT_KEYWORD, "FOR"))
+        {
+            Node forExprtemp = res.register(forExpr());
+            if (res.error != null)// ERROR check
+                return res;
+            return res.success(forExprtemp);
+        }
+        else if (current_tok.Matches(MainScript.TT_KEYWORD, "WHILE"))
+        {
+            Node whileExprtemp = res.register(whileExpr());
+            if (res.error != null)// ERROR check
+                return res;
+            return res.success(whileExprtemp);
+        }
 
 
         return res.failure(
@@ -351,8 +403,127 @@ class Parser
                 tok.posStart,
                 tok.posEnd,
                 "Expected int, float, identifier, \"+\", \"-\" or \"(\""));
+    }
+
+    private ParseResult whileExpr()
+    {
+        ParseResult res = new ParseResult();
+
+        Node condition;
+        Node body;
 
 
+        res.registerAdvancement(); // Steps over WHILE
+        advance();
+
+
+        // Registers the condition right next to the "WHILE"
+        condition = res.register(this.expr());
+        if (res.error != null)// ERROR check
+            return res;
+
+
+        if (!current_tok.Matches(MainScript.TT_KEYWORD, "THEN"))
+            return res.failure(new InvalidSyntaxError(
+                current_tok.posStart,
+                current_tok.posEnd,
+                "Expected 'THEN'"));
+
+
+        res.registerAdvancement(); // Steps over THEN
+        advance();
+
+
+
+        // Registers the expresion right next to the "THEN"
+        body = res.register(this.expr());
+        if (res.error != null)// ERROR check
+            return res;
+
+        return res.success(new WhileNode(condition, body));
+
+    }
+
+    private ParseResult forExpr()
+    {
+
+        ParseResult res = new ParseResult();
+
+        Token varName;
+        Node startVal;
+        Node bodyNode;
+        Node stepNode = null;
+        Node endVal;
+
+        res.registerAdvancement(); // Steps over FOR
+        advance();
+
+        if (current_tok.type != MainScript.TT_IDENTIFIER)
+            return res.failure(new InvalidSyntaxError(
+                current_tok.posStart,
+                current_tok.posEnd,
+                "Expected identifier"));
+
+        varName = current_tok;
+        res.registerAdvancement();// Steps over IDENTIFIER
+        advance();
+
+        if (current_tok.type != MainScript.TT_EQ)
+            return res.failure(new InvalidSyntaxError(
+                current_tok.posStart,
+                current_tok.posEnd,
+                "Expected '='"));
+
+
+        res.registerAdvancement();// Steps over EQ
+        advance();
+
+        startVal = res.register(expr());
+        if (res.error != null)// ERROR check
+            return res;
+
+
+        if (!current_tok.Matches(MainScript.TT_KEYWORD, "TO"))
+            return res.failure(new InvalidSyntaxError(
+                current_tok.posStart,
+                current_tok.posEnd,
+                "Expected 'TO'"));
+
+
+        res.registerAdvancement();// Steps over TO
+        advance();
+
+
+
+        endVal = res.register(expr());
+        if (res.error != null)// ERROR check
+            return res;
+
+
+        if (current_tok.Matches(MainScript.TT_KEYWORD, "STEP"))
+        {
+            res.registerAdvancement();// Steps over TO
+            advance();
+
+            stepNode = res.register(expr());
+            if (res.error != null)// ERROR check
+                return res;
+        }
+
+        if (!current_tok.Matches(MainScript.TT_KEYWORD, "THEN"))
+            return res.failure(new InvalidSyntaxError(
+                current_tok.posStart,
+                current_tok.posEnd,
+                "Expected 'THEN'"));
+
+        res.registerAdvancement();// Steps over THEN
+        advance();
+
+        bodyNode = res.register(expr());
+        if (res.error != null)// ERROR check
+            return res;
+
+        return res.success(new ForNode(varName, startVal, endVal, bodyNode, stepNode));
     }
 
     private ParseResult ifExpr()
@@ -1207,4 +1378,69 @@ class Interpreter
         return res.success(null);
 
     }
+
+
+    public RTResult Visit_ForNode(ForNode node, Context context)
+    {
+        RTResult res = new RTResult();
+
+        Number stepVal;
+
+        Number startVal = res.register(Visit(node.StartValue, context));
+        if (res.error != null)
+            return res;
+
+
+        Number endVal = res.register(Visit(node.EndValue, context));
+        if (res.error != null)
+            return res;
+
+
+        if(node.StepVal != null)
+        {
+            stepVal = res.register(Visit(node.StepVal, context));
+            if (res.error != null)
+                return res;
+        }
+        else
+        {
+            stepVal = new Number(1);
+        }
+
+        float? i = startVal.Value;
+
+        while (stepVal.Value >= 0 ? i < endVal.Value: i > endVal.Value)//if steps are negative it will check for smaller then i
+        {
+            context.symbolTable.Set(node.tok.value.ToString(), new Number(i));
+            i += stepVal.Value;
+
+            res.register(Visit(node.BodyVal, context));
+            if (res.error != null)
+                return res;
+        }
+        return res.success(null);
+
+    }
+
+    public RTResult Visit_WhileNode(WhileNode node, Context context)
+    {
+        RTResult res = new RTResult(); 
+
+        while (true)
+        {
+            Number condition = res.register(Visit(node.Condition, context));
+            if (res.error != null)
+                return res;
+
+            if (!condition.isTrue())
+                break;
+
+            res.register(Visit(node.BodyVal, context));
+            if (res.error != null)
+                return res;
+        }
+        return res.success(null);
+    }
+
+
 }
