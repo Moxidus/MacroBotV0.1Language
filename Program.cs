@@ -19,9 +19,9 @@ namespace MacroBotV0._1Language
                 string txt = Console.ReadLine();
                 // Console.WriteLine(txt);
 
-                (Number, CustomError) tokensAndError = MainScript.Run("<TestFileName>" ,txt);
+                (ValueF, CustomError) tokensAndError = MainScript.Run("<TestFileName>" ,txt);
                 CustomError error = tokensAndError.Item2;
-                Number result = tokensAndError.Item1;
+                ValueF result = tokensAndError.Item1;
 
                 if (error != null)
                     Console.WriteLine(error);

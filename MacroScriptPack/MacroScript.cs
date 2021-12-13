@@ -34,6 +34,8 @@ public static class MainScript
     public const string TT_GT = "TT_GT";
     public const string TT_LTE = "TT_LTE";
     public const string TT_GTE = "TT_GTE";
+    public const string TT_COMMA = "TT_COMMA";
+    public const string TT_ARROW = "TT_ARROW";
     public const string TT_EOF = "TT_EOF";
 
 
@@ -50,13 +52,14 @@ public static class MainScript
         "FOR",
         "TO",
         "STEP",
+        "FUN",
         "WHILE"
     };
 
 
 
     //Run-------------------------------------------------------------
-    public static (Number, CustomError) Run(string fn, string text)
+    public static (ValueF, CustomError) Run(string fn, string text)
     {
         //setting global VARIABLES
         GlobalSymbolTable.Set("NULL", new Number(0));
@@ -82,11 +85,9 @@ public static class MainScript
 
 
         // Run program
-        Interpreter interpreter = new Interpreter();
-        Context context = new Context("<Program>");
+        ContextHolder context = new ContextHolder("<Program>");
         context.symbolTable = GlobalSymbolTable;
-        RTResult result = interpreter.Visit(ast.node, context);
-
+        RTResult result = Interpreter.Visit(ast.node, context);
 
         return (result.value, result.error);
     }
@@ -98,19 +99,19 @@ public static class MainScript
 //#################################################################
 // RunTime Result
 //#################################################################
-class RTResult
+public class RTResult
 {
-    public Number value;
+    public ValueF value;
     public CustomError error;
 
-    public Number register(RTResult res)
+    public ValueF register(RTResult res)
     {
         if (res.error != null)
             error = res.error;
         return res.value;
     }
 
-    public RTResult success(Number value)
+    public RTResult success(ValueF value)
     {
         this.value = value;
         return this;
@@ -261,6 +262,48 @@ public class WhileNode : Node
 
     //public override string ToString() => $"({tok}, {node})";
 }
+public class FunDefNode : Node
+{
+    public List<Token> argNameToks;
+    public Node bodyNode;
+
+    public FunDefNode(List<Token> argNameToks, Node bodyNode, Token varNameTok = null) :base(varNameTok)
+    {
+        this.argNameToks = argNameToks;
+        this.bodyNode = bodyNode;
+
+        if (varNameTok != null)
+            PosStart = varNameTok.posStart;
+        else if (argNameToks.Count > 0)
+            PosStart = argNameToks[0].posStart;
+        else
+            PosStart = bodyNode.PosStart;
+
+        PosEnd = bodyNode.PosEnd;
+    }
+
+    //public override string ToString() => $"({tok}, {node})";
+}
+public class CallNode : Node
+{
+    public Node NodeToCall;
+    public List<Node> argNodes;
+
+    public CallNode(Node nodeToCall, List<Node> argNodes):base(null)
+    {
+        NodeToCall = nodeToCall;
+        this.argNodes = argNodes;
+
+        PosStart = NodeToCall.PosStart;
+
+        if (argNodes.Count > 0)
+            PosEnd = argNodes.Last().PosEnd;
+        else
+            PosEnd = NodeToCall.PosEnd;
+
+    }
+    //public override string ToString() => $"({tok}, {node})";
+}
 
 //#################################################################
 // Parse result
@@ -337,7 +380,57 @@ class Parser
         }
         return res;
     }
+    ParseResult Power() => binOp(Call, new (string, string)[] { (MainScript.TT_POW, null) }, factor);
+    ParseResult Call() {
+        ParseResult res = new ParseResult();
 
+        List<Node> argsNodes = new List<Node>();
+
+        Node atomTemp = res.register(atom());
+        if (res.error != null)
+            return res;
+
+        if(current_tok.type == MainScript.TT_LPAREN)
+        {
+            res.registerAdvancement();// Steps over LPAREN
+            advance();
+
+            if(current_tok.type == MainScript.TT_RPAREN)
+            {
+                res.registerAdvancement();// Steps over RPAREN
+                advance();
+            }
+            else
+            {
+                argsNodes.Add(res.register(expr()));// Adds the first parameter if it exists
+                if (res.error != null)
+                    return res.failure(new InvalidSyntaxError(
+                        current_tok.posStart, current_tok.posEnd,
+                        "Expected 'VAR', int, float, identifier, '+', '-', ')' , or '('"));
+            }
+
+            while(current_tok.type == MainScript.TT_COMMA)
+            {
+                res.registerAdvancement();// Steps over COMMA
+                advance();
+
+                argsNodes.Add(res.register(expr()));
+                if (res.error != null) return res; // Ends if Error was founds
+            }
+
+            if (current_tok.type != MainScript.TT_RPAREN)
+                return res.failure(new InvalidSyntaxError(
+                    current_tok.posStart, current_tok.posEnd,
+                    "Expected ',' or ')'"));
+
+            res.registerAdvancement();// Steps over RPAREN
+            advance();
+
+            return res.success(new CallNode(atomTemp, argsNodes));
+        }
+        return res.success(atomTemp);
+
+    }
     ParseResult atom(){
         ParseResult res = new ParseResult();
         Token tok = current_tok;
@@ -396,6 +489,13 @@ class Parser
                 return res;
             return res.success(whileExprtemp);
         }
+        else if (current_tok.Matches(MainScript.TT_KEYWORD, "FUN"))
+        {
+            Node funDeftemp = res.register(Fundef());
+            if (res.error != null)// ERROR check
+                return res;
+            return res.success(funDeftemp);
+        }
 
 
         return res.failure(
@@ -403,6 +503,86 @@ class Parser
                 tok.posStart,
                 tok.posEnd,
                 "Expected int, float, identifier, \"+\", \"-\" or \"(\""));
+    }
+
+    private ParseResult Fundef()
+    {
+        ParseResult res = new ParseResult();
+
+        List<Token> argNameTokens = new List<Token>();
+        Node bodyNode;
+        Token varNameTok = null;
+
+        res.registerAdvancement(); // Steps over FUN
+        advance();
+
+        string errorMsg = "Expected '('";
+        if (current_tok.type == MainScript.TT_IDENTIFIER)
+        {
+            varNameTok = current_tok;
+            res.registerAdvancement(); // Steps over IDENTIFIER
+            advance();
+        } else
+            errorMsg += " or identifier";
+        if (current_tok.type != MainScript.TT_LPAREN)
+            return res.failure(new InvalidSyntaxError(current_tok.posStart, current_tok.posEnd, errorMsg));
+
+        res.registerAdvancement(); // Steps over LPAREN
+        advance();
+
+        if(current_tok.type == MainScript.TT_IDENTIFIER)
+        {
+            argNameTokens.Add(current_tok);
+            res.registerAdvancement(); // Steps over IDENTIFIER
+            advance();
+
+            while (current_tok.type == MainScript.TT_COMMA)
+            {
+                res.registerAdvancement(); // Steps over COMMA
+                advance();
+
+                if (current_tok.type != MainScript.TT_IDENTIFIER)
+                    return res.failure(new InvalidSyntaxError(
+                        current_tok.posStart,
+                        current_tok.posEnd,
+                        "Expected Identifier"));
+
+                argNameTokens.Add(current_tok);
+                res.registerAdvancement(); // Steps over IDENTIFIER
+                advance();
+            }
+
+            if (current_tok.type != MainScript.TT_RPAREN)
+                return res.failure(new InvalidSyntaxError(
+                    current_tok.posStart,
+                    current_tok.posEnd,
+                    "Expected ')' or ','"));
+        } else
+        {
+            if (current_tok.type != MainScript.TT_RPAREN)
+                return res.failure(new InvalidSyntaxError(
+                    current_tok.posStart,
+                    current_tok.posEnd,
+                    "Expected 'identifier' or ')'"));
+        }
+
+        res.registerAdvancement(); // Steps over RPARAN
+        advance();
+
+        if (current_tok.type != MainScript.TT_ARROW)
+            return res.failure(new InvalidSyntaxError(
+                current_tok.posStart,
+                current_tok.posEnd,
+                "Expected '->'"));
+
+        res.registerAdvancement(); // Steps over ARROW
+        advance();
+
+        bodyNode = res.register(expr());
+        if (res.error != null)
+            return res;
+
+        return res.success(new FunDefNode(argNameTokens, bodyNode, varNameTok));
     }
 
     private ParseResult whileExpr()
@@ -618,7 +798,6 @@ class Parser
         return Power();
     }
 
-    ParseResult Power() => binOp(atom, new(string, string)[] { (MainScript.TT_POW, null) },factor);
 
     ParseResult term() => binOp(factor, new (string, string)[] { (MainScript.TT_MUL, null), (MainScript.TT_DIV, null) });
 
@@ -849,8 +1028,7 @@ public class Lexer
                         advance();
                         break;
                     case '-':
-                        tokens.Add(new Token(MainScript.TT_MINUS, posStart: this.pos));
-                        advance();
+                        tokens.Add(makeMinusOrArrow());
                         break;
                     case '*':
                         tokens.Add(new Token(MainScript.TT_MUL, posStart: this.pos));
@@ -887,6 +1065,10 @@ public class Lexer
                     case '>':
                         tokens.Add(makeGreaterThen());
                         break;
+                    case ',':
+                        tokens.Add(new Token(MainScript.TT_COMMA, posStart: this.pos));
+                        advance();
+                        break;
                     default:
                         if (MainScript.DIGITS.Contains((char)current_char)){
                             tokens.Add(make_number());
@@ -908,6 +1090,21 @@ public class Lexer
 
         tokens.Add(new Token(MainScript.TT_EOF, posStart: this.pos));
         return (tokens, null);
+    }
+
+    private Token makeMinusOrArrow()
+    {
+        string tokenType = MainScript.TT_MINUS;
+        Position posStart = this.pos.copy();
+        advance();
+
+        if (current_char == '>')
+        {
+            advance();
+            tokenType = MainScript.TT_ARROW;
+        }
+
+        return new Token(tokenType, posStart: posStart, posEnd: pos);
     }
 
     private Token makeGreaterThen()
@@ -1037,137 +1234,264 @@ public class Token
 //#################################################################
 // Values
 //#################################################################
-public class Number
+
+public class ValueF
 {
-    public float? Value;
-    Position PosStart;
-    Position PosEnd;
-    public Context Context;
+    public Position PosStart;
+    public Position PosEnd;
+    public ContextHolder Context;
 
-    public Number(object value)
+    public ValueF()
     {
-        this.Value = float.Parse(value.ToString());
         SetPos();
+        setContext();
     }
 
-    public Number(float? value, Position posStart, Position posEnd, Context context)
+    public ValueF setContext(ContextHolder context = null)
     {
-
-        this.Value = value;
-        this.PosStart = posStart;
-        this.PosEnd = posEnd;
         this.Context = context;
+        return this;
     }
-
-
-    public Number SetPos(Position posStart = null, Position posEnd = null){
+    public ValueF SetPos(Position posStart = null, Position posEnd = null)
+    {
         this.PosStart = posStart;
         this.PosEnd = posEnd;
         return this;
     }
-    public (Number, CustomError) AddedTo(Number other){
-        return (new Number(Value + other.Value).setContext(this.Context), null);
-    }
-    public (Number, CustomError) SubbedBy(Number other)
+    public virtual ValueF Copy() => new ValueF();
+    public virtual (ValueF, CustomError) AddedTo(ValueF other) => (null, IllegalOperation(other));
+    public virtual (ValueF, CustomError) SubbedBy(ValueF other) => (null, IllegalOperation(other));
+    public virtual (ValueF, CustomError) MultedBy(ValueF other) => (null, IllegalOperation(other));
+    public virtual (ValueF, CustomError) DivBy(ValueF other) => (null, IllegalOperation(other));
+    internal virtual (ValueF, CustomError) PoweredBy(ValueF other) => (null, IllegalOperation(other));
+    internal virtual (ValueF, CustomError) GetComparisonEE(ValueF other) => (null, IllegalOperation(other));
+    internal virtual (ValueF, CustomError) GetComparisonNE(ValueF other) => (null, IllegalOperation(other));
+    internal virtual (ValueF, CustomError) GetComparisonLT(ValueF other) => (null, IllegalOperation(other));
+    internal virtual (ValueF, CustomError) GetComparisonGT(ValueF other) => (null, IllegalOperation(other));
+    internal virtual (ValueF, CustomError) GetComparisonLTE(ValueF other) => (null, IllegalOperation(other));
+    internal virtual (ValueF, CustomError) GetComparisonGTE(ValueF other) => (null, IllegalOperation(other));
+    internal virtual (ValueF, CustomError) AndedBy(ValueF other) => (null, IllegalOperation(other));
+    internal virtual (ValueF, CustomError) OredBy(ValueF other) => (null, IllegalOperation(other));
+    internal virtual (ValueF, CustomError) Notted() => (null, IllegalOperation());
+    internal virtual bool isTrue() => false;
+    public virtual RTResult Execute(List<ValueF> args) => new RTResult().failure(IllegalOperation());
+    public CustomError IllegalOperation(ValueF other= null)
     {
-        return (new Number(Value - other.Value).setContext(this.Context), null);
-    }
-    public (Number, CustomError) MultedBy(Number other)
-    {
-        return (new Number(Value * other.Value).setContext(this.Context), null);
-    }
-    public (Number, CustomError) DivBy(Number other)
-    {
-        if (other.Value == 0)
-            return (null, new RTError(other.PosStart, other.PosEnd, "Division by zero", this.Context));
-        return (new Number(Value / other.Value).setContext(this.Context), null);
-    }
-
-    internal (Number, CustomError) PoweredBy(Number right)
-    {
-        return (new Number(MathF.Pow((float)Value, (float)right.Value)).setContext(this.Context), null);
-    }
-
-    public Number Copy()
-    {
-        return new Number(this.Value, PosStart, PosEnd, this.Context);
-    }
+        if (other == null)
+            other = this;
 
 
+        return new RTError(
+            PosStart, other.PosEnd,
+            "Illegal operation",
+            Context);
+    }
+}
+
+public class Number : ValueF
+{
+    public float? Value;
+
+    public Number(object value):base()
+    {
+        this.Value = float.Parse(value.ToString());
+    }
+
+    public override ValueF Copy()
+    {
+        Number copy = new Number(Value);
+        copy.SetPos(PosStart, PosEnd);
+        copy.setContext(Context);
+        return copy;
+    }
     public override string ToString()
     {
         return Value.ToString();
     }
-
-    public Number setContext(Context context = null)
-    {
-        this.Context = context;
-        return this;
+    public override (ValueF, CustomError) AddedTo(ValueF other){
+        if (other is Number)
+            return (new Number(Value + ((Number)other).Value).setContext(this.Context), null);
+        else
+            return (null, IllegalOperation(other));
     }
-
-    internal (Number, CustomError) GetComparisonEE(Number other)
+    public override (ValueF, CustomError) SubbedBy(ValueF other)
     {
-        return (new Number(Value == other.Value ? 1 : 0).setContext(Context), null);
+        if (other is Number)
+            return (new Number(Value - ((Number)other).Value).setContext(this.Context), null);
+        else
+            return (null, IllegalOperation(other));
     }
-
-    internal (Number, CustomError) GetComparisonNE(Number other)
+    public override (ValueF, CustomError) MultedBy(ValueF other)
     {
-        return (new Number(Value != other.Value ? 1 : 0).setContext(Context), null);
+        if (other is Number)
+            return (new Number(Value * ((Number)other).Value).setContext(this.Context), null);
+        else
+            return (null, IllegalOperation(other));
     }
-
-    internal (Number, CustomError) GetComparisonLT(Number other)
+    public override (ValueF, CustomError) DivBy(ValueF other)
     {
-        return (new Number(Value < other.Value ? 1 : 0).setContext(Context), null);
-    }
+        if (other is Number)
+        {
+            if (((Number)other).Value == 0)
+                return (null, new RTError(other.PosStart, other.PosEnd, "Division by zero", this.Context));
+            return (new Number(Value / ((Number)other).Value).setContext(this.Context), null);
+        }
+        else
+            return (null, IllegalOperation(other));
 
-    internal (Number, CustomError) GetComparisonGT(Number other)
+    }
+    internal override (ValueF, CustomError) PoweredBy(ValueF other)
     {
-        return (new Number(Value > other.Value ? 1 : 0).setContext(Context), null);
+        if (other is Number)
+            return (new Number(MathF.Pow((float)Value, (float)((Number)other).Value)).setContext(this.Context), null);
+        else
+            return (null, IllegalOperation(other));
     }
-
-    internal (Number, CustomError) GetComparisonLTE(Number other)
+    internal override (ValueF, CustomError) GetComparisonEE(ValueF other)
     {
-        return (new Number(Value <= other.Value ? 1 : 0).setContext(Context), null);
+        if (other is Number)
+            return (new Number(Value == ((Number)other).Value ? 1 : 0).setContext(Context), null);
+        else
+            return (null, IllegalOperation(other));
     }
-
-    internal (Number, CustomError) GetComparisonGTE(Number other)
+    internal override (ValueF, CustomError) GetComparisonNE(ValueF other)
     {
-        return (new Number(Value >= other.Value ? 1 : 0).setContext(Context), null);
+        if (other is Number)
+            return (new Number(Value != ((Number)other).Value ? 1 : 0).setContext(Context), null);
+        else
+            return (null, IllegalOperation(other));
     }
-
-    internal (Number, CustomError) AndedBy(Number other)
+    internal override (ValueF, CustomError) GetComparisonLT(ValueF other)
     {
-        return (new Number(Value == 1 && other.Value == 1 ? 1 : 0).setContext(Context), null);
+        if (other is Number)
+            return (new Number(Value < ((Number)other).Value ? 1 : 0).setContext(Context), null);
+        else
+            return (null, IllegalOperation(other));
     }
-
-    internal (Number, CustomError) OredBy(Number other)
+    internal override (ValueF, CustomError) GetComparisonGT(ValueF other)
     {
-        return (new Number(Value == 1 || other.Value == 1 ? 1 : 0).setContext(Context), null);
+        if (other is Number)
+            return (new Number(Value > ((Number)other).Value ? 1 : 0).setContext(Context), null);
+        else
+            return (null, IllegalOperation(other));
     }
-
-    internal (Number, CustomError) Notted()
+    internal override (ValueF, CustomError) GetComparisonLTE(ValueF other)
+    {
+        if (other is Number)
+            return (new Number(Value <= ((Number)other).Value ? 1 : 0).setContext(Context), null);
+        else
+            return (null, IllegalOperation(other));
+    }
+    internal override (ValueF, CustomError) GetComparisonGTE(ValueF other)
+    {
+        if (other is Number)
+            return (new Number(Value >= ((Number)other).Value ? 1 : 0).setContext(Context), null);
+        else
+            return (null, IllegalOperation(other));
+    }
+    internal override (ValueF, CustomError) AndedBy(ValueF other)
+    {
+        if (other is Number)
+            return (new Number(Value == 1 && ((Number)other).Value == 1 ? 1 : 0).setContext(Context), null);
+        else
+            return (null, IllegalOperation(other));
+    }
+    internal override (ValueF, CustomError) OredBy(ValueF other)
+    {
+        if (other is Number)
+            return (new Number(Value == 1 || ((Number)other).Value == 1 ? 1 : 0).setContext(Context), null);
+        else
+            return (null, IllegalOperation(other));
+    }
+    internal override (ValueF, CustomError) Notted()
     {
         return (new Number(Value == 0? 1 : 0), null);
     }
-
-    internal bool isTrue()
+    internal override bool isTrue()
     {
         return Value != 0;
     }
+}
+
+class Function : ValueF
+{
+    string Name;
+    Node BodyNode;
+    List<string> argNames;
+
+    public Function(Node bodyNode, List<string> argNames, string name = "<anonymous>")
+    {
+        Name = name;
+        BodyNode = bodyNode;
+        this.argNames = argNames;
+    }
+
+    public override RTResult Execute(List<ValueF> args)//POTENTIAL ERROR: not sure what type this arg is supossed to be
+    {
+        RTResult res = new RTResult();
+        ContextHolder newContext = new ContextHolder( Name, Context, PosStart);
+        newContext.symbolTable = new SymbolTable(newContext.parent.symbolTable);
+
+        if (args.Count > argNames.Count)
+            return res.failure(
+                new RTError(
+                    PosStart, PosEnd,
+                    $"{args.Count - argNames.Count} too many args passed into {Name}",
+                    Context));
+
+
+        if (args.Count < argNames.Count)
+            return res.failure(
+                new RTError(
+                    PosStart, PosEnd,
+                    $"{argNames.Count - args.Count} too few args passed into {Name}",
+                    Context));
+
+        for(int i = 0; i < args.Count; i++)
+        {
+            string argName = argNames[i];
+            Number argValue = (Number)args[i];
+            argValue.setContext(Context);
+            newContext.symbolTable.Set(argName, argValue);
+        }
+
+        ValueF value = res.register(Interpreter.Visit(BodyNode, newContext));
+        if (res.error != null)
+            return res;
+
+        return res.success(value);
+    }
+
+    public override ValueF Copy()
+    {
+        ValueF copy = new Function(BodyNode, argNames, Name);
+
+        copy.setContext(Context);
+
+        copy.SetPos(PosStart, PosEnd);
+
+        return copy;
+    }
+
+    public override string ToString()
+    {
+        return $"<function {Name}>";
+    }
+
 }
 
 
 //#################################################################
 // Context
 //#################################################################
-public class Context
+public class ContextHolder
 {
     public string displayName;
-    public Context parent;
+    public ContextHolder parent;
     public Position parentEtrPos;
     public SymbolTable symbolTable;
 
-    public Context(string displayName, Context parent = null, Position parentEtrPos = null)
+    public ContextHolder(string displayName, ContextHolder parent = null, Position parentEtrPos = null)
     {
         this.displayName = displayName;
         this.parent = parent;
@@ -1179,11 +1503,17 @@ public class Context
 // SYMBOL Table
 //#################################################################
 public class SymbolTable {
-    Dictionary<string, Number> Symbols = new Dictionary<string, Number>();
+    Dictionary<string, ValueF> Symbols = new Dictionary<string, ValueF>();
     SymbolTable Parent;
 
+    public SymbolTable(SymbolTable parent = null)
+    {
+        Parent = parent;
+    }
+
+
     //Finds the variable in Symbols tree
-    public Number get(string name)
+    public ValueF get(string name)
     {
         if (!Symbols.ContainsKey(name) && Parent != null)
         {
@@ -1196,7 +1526,7 @@ public class SymbolTable {
         return Symbols[name];
     }
 
-    public void Set(string name, Number value)
+    public void Set(string name, ValueF value)
     {
         if (!Symbols.ContainsKey(name))
             Symbols.Add(name, value);
@@ -1212,22 +1542,18 @@ public class SymbolTable {
         }
 
     }
-
-
-
-
 }
 
 
 //#################################################################
 // Interpreter
 //#################################################################
-class Interpreter
+static class Interpreter
 {
-    public RTResult Visit(Node node, Context context) {
+    public static RTResult Visit(Node node, ContextHolder context) {
         string method_name = $"Visit_{node.GetType().Name}";
 
-        Type thisType = this.GetType();
+        Type thisType = typeof(Interpreter);
         MethodInfo theMethod = thisType.GetMethod(method_name);
         object[] para = { node, context };
 
@@ -1239,19 +1565,19 @@ class Interpreter
             return null;
         }
 
-        return (RTResult)theMethod.Invoke(this, para);
+        return (RTResult)theMethod.Invoke(null, para);
 
     }
-    public void NoVisitMethod(Node node, Context context)
+    public static void NoVisitMethod(Node node, ContextHolder context)
     {
         throw new Exception($"No Visit_{node.GetType().Name} method defined");
     }
-    public RTResult Visit_VarAccessNode(Node node, Context context)
+    public static RTResult Visit_VarAccessNode(Node node, ContextHolder context)
     {
         RTResult res = new RTResult();
 
         string varName = node.tok.value.ToString();
-        Number value = context.symbolTable.get(varName);
+        ValueF value = context.symbolTable.get(varName);
 
         if (value == null)
         {
@@ -1262,7 +1588,7 @@ class Interpreter
 
         return res.success(value);
     }
-    public RTResult Visit_VarAssignNode(Node node, Context context)
+    public static RTResult Visit_VarAssignNode(Node node, ContextHolder context)
     {
         RTResult res = new RTResult();
         VarAssignNode varAssignNode = (VarAssignNode)node;
@@ -1270,31 +1596,32 @@ class Interpreter
         Console.WriteLine(varAssignNode.VarNameTok.ToString());
 
         string varName = varAssignNode.VarNameTok.value.ToString();
-        Number value = res.register(Visit(varAssignNode.ValueNode, context));
+        Number value = (Number)res.register(Visit(varAssignNode.ValueNode, context));
 
         if (res.error != null)
             return res;
         context.symbolTable.Set(varName, value);
         return res.success(value);
     }
-    public RTResult Visit_NumberNode(NumberNode node, Context context)
+    public static RTResult Visit_NumberNode(NumberNode node, ContextHolder context)
     {
-        return new RTResult().success(
-            new Number(node.tok.value).setContext(context).SetPos(node.PosStart, node.PosEnd));
+        return new RTResult().success((Number)new Number(node.tok.value).
+            setContext(context).SetPos(node.PosStart, node.PosEnd)
+            );
     }
-    public RTResult Visit_BinOpNode(BinOpNode node, Context context)
+    public static RTResult Visit_BinOpNode(BinOpNode node, ContextHolder context)
     {
         RTResult res = new RTResult();
 
 
-        Number left = res.register(Visit(node.left_node, context));
+        Number left = (Number)res.register(Visit(node.left_node, context));
         if (res.error != null)
             return res;
-        Number right = res.register(Visit(node.right_node, context));
+        Number right = (Number)res.register(Visit(node.right_node, context));
         if (res.error != null)
             return res;
 
-        (Number, CustomError) result = (null, null);
+        (ValueF, CustomError) result = (null, null);
 
         switch (node.tok.type)
         {
@@ -1322,20 +1649,20 @@ class Interpreter
         if (result.Item2 != null)
             return res.failure(result.Item2);
         else
-            return res.success(result.Item1.SetPos(node.PosStart, node.PosEnd));
+            return res.success((Number)result.Item1.SetPos(node.PosStart, node.PosEnd));
 
     }
-    public RTResult Visit_UnaryOpNode(UnaryOpNode node, Context context)
+    public static RTResult Visit_UnaryOpNode(UnaryOpNode node, ContextHolder context)
     {
         RTResult res = new RTResult();
 
 
-        Number numb = res.register(Visit(node.node, context));
+        Number numb = (Number)res.register(Visit(node.node, context));
         if (res.error != null)
             return res;
 
 
-        (Number, CustomError) result = (numb, null);
+        (ValueF, CustomError) result = (numb, null);
 
 
         if (node.tok.type == MainScript.TT_MINUS)
@@ -1347,21 +1674,21 @@ class Interpreter
         if (res.error != null)
             return res.failure(result.Item2);
         else
-            return res.success(result.Item1.SetPos(node.PosStart, node.PosEnd));
+            return res.success((Number)result.Item1.SetPos(node.PosStart, node.PosEnd));
     }
-    public RTResult Visit_VarIfThenNode(VarIfThenNode node, Context context)
+    public static RTResult Visit_VarIfThenNode(VarIfThenNode node, ContextHolder context)
     {
         RTResult res = new RTResult();
 
         foreach((Node, Node) conNExpr in node.cases)
         {
-            Number conditionValue = res.register(Visit(conNExpr.Item1, context));
+            Number conditionValue = (Number)res.register(Visit(conNExpr.Item1, context));
             if (res.error != null)// ERROR check
                 return res;
 
             if (conditionValue.isTrue())
             {
-                Number exprVal = res.register(Visit(conNExpr.Item2, context));
+                Number exprVal = (Number)res.register(Visit(conNExpr.Item2, context));
                 if (res.error != null)// ERROR check
                     return res;
                 return res.success(exprVal);
@@ -1370,7 +1697,7 @@ class Interpreter
         }
         if (node.elseCase != null)
         {
-            Number elseVal = res.register(Visit(node.elseCase, context));
+            Number elseVal = (Number)res.register(Visit(node.elseCase, context));
             if (res.error != null)// ERROR check
                 return res;
             return res.success(elseVal);
@@ -1378,27 +1705,25 @@ class Interpreter
         return res.success(null);
 
     }
-
-
-    public RTResult Visit_ForNode(ForNode node, Context context)
+    public static RTResult Visit_ForNode(ForNode node, ContextHolder context)
     {
         RTResult res = new RTResult();
 
         Number stepVal;
 
-        Number startVal = res.register(Visit(node.StartValue, context));
+        Number startVal = (Number)res.register(Visit(node.StartValue, context));
         if (res.error != null)
             return res;
 
 
-        Number endVal = res.register(Visit(node.EndValue, context));
+        Number endVal = (Number)res.register(Visit(node.EndValue, context));
         if (res.error != null)
             return res;
 
 
         if(node.StepVal != null)
         {
-            stepVal = res.register(Visit(node.StepVal, context));
+            stepVal = (Number)res.register(Visit(node.StepVal, context));
             if (res.error != null)
                 return res;
         }
@@ -1421,14 +1746,13 @@ class Interpreter
         return res.success(null);
 
     }
-
-    public RTResult Visit_WhileNode(WhileNode node, Context context)
+    public static RTResult Visit_WhileNode(WhileNode node, ContextHolder context)
     {
         RTResult res = new RTResult(); 
 
         while (true)
         {
-            Number condition = res.register(Visit(node.Condition, context));
+            Number condition = (Number)res.register(Visit(node.Condition, context));
             if (res.error != null)
                 return res;
 
@@ -1442,5 +1766,41 @@ class Interpreter
         return res.success(null);
     }
 
+    public static RTResult Visit_FunDefNode(FunDefNode node, ContextHolder context)
+    {
+        RTResult res = new RTResult();
 
+        string funName = node.tok != null ? node.tok.value.ToString() : null;
+        Node bodyNode = node.bodyNode;
+        List<string> argNames = new List<string>();
+        node.argNameToks.ToList().ForEach(x => argNames.Add(x.value.ToString()));
+        Function FuncValue = (Function)new Function(bodyNode, argNames, null).setContext(context).SetPos(node.PosStart, node.PosEnd);
+
+        if (node.tok != null)
+            context.symbolTable.Set(funName, FuncValue);
+
+        return res.success(FuncValue);
+    }
+
+    public static RTResult Visit_CallNode(CallNode node, ContextHolder context)
+    {
+        RTResult res = new RTResult();
+
+        List<ValueF> args = new List<ValueF>();
+
+        ValueF valueToCall = res.register(Visit(node.NodeToCall, context));
+        if (res.error != null) return res;
+        valueToCall = valueToCall.Copy().SetPos(node.PosStart, node.PosEnd);
+
+        foreach(Node argNode in node.argNodes)
+        {
+            args.Add(res.register(Visit(argNode, context)));
+            if (res.error != null) return res;
+        }
+
+        ValueF returnValue = res.register(valueToCall.Execute(args));
+        if (res.error != null) return res;
+
+        return res.success(returnValue);
+    }
 }
