@@ -15,7 +15,7 @@ public static class MainScript
     public static string LETTERS = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz_";
     public static string LETTERS_DIGITS = LETTERS + DIGITS;
 
-    //tokens constants
+    #region tokens constants
     public const string TT_INT = "TT_INT";
     public const string TT_FLOAT = "TT_FLOAT";
     public const string TT_IDENTIFIER = "TT_IDENTIFIER";
@@ -37,7 +37,7 @@ public static class MainScript
     public const string TT_COMMA = "TT_COMMA";
     public const string TT_ARROW = "TT_ARROW";
     public const string TT_EOF = "TT_EOF";
-
+    #endregion
 
     public static string[] KEYWORDS =
     {
@@ -56,9 +56,6 @@ public static class MainScript
         "WHILE"
     };
 
-
-
-    //Run-------------------------------------------------------------
     public static (ValueF, CustomError) Run(string fn, string text)
     {
         //setting global VARIABLES
@@ -96,18 +93,20 @@ public static class MainScript
 }
 
 
-//#################################################################
-// RunTime Result
-//#################################################################
+#region RunTime Result
 public class RTResult
 {
     public ValueF value;
     public CustomError error;
+    public bool HasError;
 
     public ValueF register(RTResult res)
     {
-        if (res.error != null)
+        if (res.HasError)
+        {
             error = res.error;
+            this.HasError = true;
+        }
         return res.value;
     }
 
@@ -120,16 +119,14 @@ public class RTResult
     public RTResult failure(CustomError error)
     {
         this.error = error;
+        HasError = true;
         return this;
     }
 
 }
+#endregion
 
-
-
-//#################################################################
-// Nodes
-//#################################################################
+#region Nodes
 public class Node
 {
     public Token tok;
@@ -304,15 +301,14 @@ public class CallNode : Node
     }
     //public override string ToString() => $"({tok}, {node})";
 }
+#endregion
 
-//#################################################################
-// Parse result
-//#################################################################
 class ParseResult
 {
     public CustomError error;
     public Node node;
     public int advanceCount = 0;
+    public bool HasError;
 
 
     public void registerAdvancement()
@@ -322,7 +318,7 @@ class ParseResult
 
     public Node register(ParseResult res) {
         advanceCount += res.advanceCount;
-        if (res.error != null)
+        if (res.HasError)
             this.error = res.error;
         return res.node;
     }
@@ -335,15 +331,12 @@ class ParseResult
     public ParseResult failure(CustomError error) {
         if(this.error == null || this.advanceCount == 0) 
             this.error = error;
+        HasError = true;
         return this;
     }
 
 }
 
-
-//#################################################################
-// Parser
-//#################################################################
 class Parser
 {
     List<Token> tokens;
@@ -371,7 +364,7 @@ class Parser
     public ParseResult parse()
     {
         ParseResult res = expr();
-        if (res.error == null && this.current_tok.type != MainScript.TT_EOF)
+        if (!res.HasError && this.current_tok.type != MainScript.TT_EOF)
         {
             return res.failure(new InvalidSyntaxError(
                 this.current_tok.posStart,
@@ -387,7 +380,7 @@ class Parser
         List<Node> argsNodes = new List<Node>();
 
         Node atomTemp = res.register(atom());
-        if (res.error != null)
+        if (res.HasError)
             return res;
 
         if(current_tok.type == MainScript.TT_LPAREN)
@@ -403,7 +396,7 @@ class Parser
             else
             {
                 argsNodes.Add(res.register(expr()));// Adds the first parameter if it exists
-                if (res.error != null)
+                if (res.HasError)
                     return res.failure(new InvalidSyntaxError(
                         current_tok.posStart, current_tok.posEnd,
                         "Expected 'VAR', int, float, identifier, '+', '-', ')' , or '('"));
@@ -415,7 +408,7 @@ class Parser
                 advance();
 
                 argsNodes.Add(res.register(expr()));
-                if (res.error != null) return res; // Ends if Error was founds
+                if (res.HasError) return res; // Ends if Error was founds
             }
 
             if (current_tok.type != MainScript.TT_RPAREN)
@@ -452,7 +445,7 @@ class Parser
             res.registerAdvancement();
             advance();
             Node exprTemp = res.register(expr());
-            if (res.error != null)
+            if (res.HasError)
                 return res;
             if (current_tok.type == MainScript.TT_RPAREN)
             {
@@ -471,28 +464,28 @@ class Parser
         else if (current_tok.Matches(MainScript.TT_KEYWORD, "IF"))//checks for if expresions
         {
             Node ifExprtemp = res.register(ifExpr());
-            if (res.error != null)// ERROR check
+            if (res.HasError)// ERROR check
                 return res;
             return res.success(ifExprtemp);
         }
         else if (current_tok.Matches(MainScript.TT_KEYWORD, "FOR"))
         {
             Node forExprtemp = res.register(forExpr());
-            if (res.error != null)// ERROR check
+            if (res.HasError)// ERROR check
                 return res;
             return res.success(forExprtemp);
         }
         else if (current_tok.Matches(MainScript.TT_KEYWORD, "WHILE"))
         {
             Node whileExprtemp = res.register(whileExpr());
-            if (res.error != null)// ERROR check
+            if (res.HasError)// ERROR check
                 return res;
             return res.success(whileExprtemp);
         }
         else if (current_tok.Matches(MainScript.TT_KEYWORD, "FUN"))
         {
             Node funDeftemp = res.register(Fundef());
-            if (res.error != null)// ERROR check
+            if (res.HasError)// ERROR check
                 return res;
             return res.success(funDeftemp);
         }
@@ -579,7 +572,7 @@ class Parser
         advance();
 
         bodyNode = res.register(expr());
-        if (res.error != null)
+        if (res.HasError)
             return res;
 
         return res.success(new FunDefNode(argNameTokens, bodyNode, varNameTok));
@@ -599,7 +592,7 @@ class Parser
 
         // Registers the condition right next to the "WHILE"
         condition = res.register(this.expr());
-        if (res.error != null)// ERROR check
+        if (res.HasError)// ERROR check
             return res;
 
 
@@ -617,7 +610,7 @@ class Parser
 
         // Registers the expresion right next to the "THEN"
         body = res.register(this.expr());
-        if (res.error != null)// ERROR check
+        if (res.HasError)// ERROR check
             return res;
 
         return res.success(new WhileNode(condition, body));
@@ -659,7 +652,7 @@ class Parser
         advance();
 
         startVal = res.register(expr());
-        if (res.error != null)// ERROR check
+        if (res.HasError)// ERROR check
             return res;
 
 
@@ -676,7 +669,7 @@ class Parser
 
 
         endVal = res.register(expr());
-        if (res.error != null)// ERROR check
+        if (res.HasError)// ERROR check
             return res;
 
 
@@ -686,7 +679,7 @@ class Parser
             advance();
 
             stepNode = res.register(expr());
-            if (res.error != null)// ERROR check
+            if (res.HasError)// ERROR check
                 return res;
         }
 
@@ -700,7 +693,7 @@ class Parser
         advance();
 
         bodyNode = res.register(expr());
-        if (res.error != null)// ERROR check
+        if (res.HasError)// ERROR check
             return res;
 
         return res.success(new ForNode(varName, startVal, endVal, bodyNode, stepNode));
@@ -718,7 +711,7 @@ class Parser
 
         // Registers the expresion right next to the "IF"
         Node condition = res.register(this.expr());
-        if (res.error != null)// ERROR check
+        if (res.HasError)// ERROR check
             return res;
 
         // If token next to expresion is not "THEN" throw an error
@@ -734,7 +727,7 @@ class Parser
 
         // Registers the expresion right next to the "THEN"
         Node exprTemp = res.register(this.expr());
-        if (res.error != null)// ERROR check
+        if (res.HasError)// ERROR check
             return res;
         cases.Add((condition, exprTemp));
 
@@ -744,7 +737,7 @@ class Parser
             advance();
 
             condition = res.register(expr());
-            if (res.error != null)// ERROR check
+            if (res.HasError)// ERROR check
                 return res;
 
             if (!current_tok.Matches(MainScript.TT_KEYWORD, "THEN"))
@@ -758,7 +751,7 @@ class Parser
             advance();
 
             exprTemp = res.register(expr());
-            if (res.error != null)// ERROR check
+            if (res.HasError)// ERROR check
                 return res;
 
             cases.Add((condition, exprTemp));
@@ -771,7 +764,7 @@ class Parser
             advance();
 
             exprTemp = res.register(expr());
-            if (res.error != null)// ERROR check
+            if (res.HasError)// ERROR check
                 return res;
             elseCase = exprTemp;
         }
@@ -789,7 +782,7 @@ class Parser
             res.registerAdvancement();
             advance();
             Node factorTemp = res.register(factor());
-            if (res.error != null)
+            if (res.HasError)
                 return res;
             return res.success(new UnaryOpNode(tok, factorTemp));
 
@@ -837,14 +830,14 @@ class Parser
 
             // Registers the expresion right next to the "="
             Node exTemp = res.register(this.expr());
-            if (res.error != null)// ERROR check
+            if (res.HasError)// ERROR check
                 return res;
 
             return res.success(new VarAssignNode(varName, exTemp));
         }
 
         Node node = res.register(binOp(compExpr, new (string, string)[] { (MainScript.TT_KEYWORD, "AND"), (MainScript.TT_KEYWORD, "OR") }));
-        if (res.error != null)
+        if (res.HasError)
             return res.failure(new InvalidSyntaxError(
                 current_tok.posStart, current_tok.posEnd,
                 "Expected 'VAR', int, float, identifier, '+', '-', or '('"));
@@ -863,14 +856,14 @@ class Parser
             advance();
 
             Node nodeNot = res.register(compExpr());
-            if (res.error != null)
+            if (res.HasError)
                 return res;
             return res.success(new UnaryOpNode(opTok, nodeNot));
         }
 
         Node node = res.register(binOp(arithExpr, new (string, string)[] {(MainScript.TT_EE, null), (MainScript.TT_NE, null), (MainScript.TT_LT, null), (MainScript.TT_GT, null), (MainScript.TT_GTE, null), (MainScript.TT_LTE, null) }));
 
-        if (res.error != null)
+        if (res.HasError)
             return res.failure(
                 new InvalidSyntaxError(
                     node.PosStart,
@@ -893,7 +886,7 @@ class Parser
 
         ParseResult res = new ParseResult();
         Node left = res.register(funcA());// Find left node
-        if (res.error != null)// ERROR check
+        if (res.HasError)// ERROR check
             return res;
 
         while (ops.Any(x => x.Item1 == current_tok.type && current_tok.value == null) ||
@@ -903,7 +896,7 @@ class Parser
             res.registerAdvancement();
             advance();
             Node right = res.register(funcB());// Finds right node
-            if (res.error != null)// ERROR check
+            if (res.HasError)// ERROR check
                 return res;
             left = new BinOpNode(left, op_tok, right);
         }
@@ -913,9 +906,6 @@ class Parser
 
 }
 
-//#################################################################
-// Position
-//#################################################################
 public class Position
 {
     public int idx;
@@ -953,11 +943,6 @@ public class Position
 
 }
 
-
-
-//#################################################################
-// LEXER
-//#################################################################
 public class Lexer
 {
     string text;
@@ -1189,11 +1174,6 @@ public class Lexer
     }
 }
 
-
-
-//#################################################################
-// TOKENS
-//#################################################################
 public class Token
 {
     public string type;
@@ -1229,12 +1209,7 @@ public class Token
     }
 }
 
-
-
-//#################################################################
-// Values
-//#################################################################
-
+#region Values
 public class ValueF
 {
     public Position PosStart;
@@ -1259,21 +1234,25 @@ public class ValueF
         return this;
     }
     public virtual ValueF Copy() => new ValueF();
+
+    #region Mathematical expresion methods
     public virtual (ValueF, CustomError) AddedTo(ValueF other) => (null, IllegalOperation(other));
     public virtual (ValueF, CustomError) SubbedBy(ValueF other) => (null, IllegalOperation(other));
     public virtual (ValueF, CustomError) MultedBy(ValueF other) => (null, IllegalOperation(other));
     public virtual (ValueF, CustomError) DivBy(ValueF other) => (null, IllegalOperation(other));
-    internal virtual (ValueF, CustomError) PoweredBy(ValueF other) => (null, IllegalOperation(other));
-    internal virtual (ValueF, CustomError) GetComparisonEE(ValueF other) => (null, IllegalOperation(other));
-    internal virtual (ValueF, CustomError) GetComparisonNE(ValueF other) => (null, IllegalOperation(other));
-    internal virtual (ValueF, CustomError) GetComparisonLT(ValueF other) => (null, IllegalOperation(other));
-    internal virtual (ValueF, CustomError) GetComparisonGT(ValueF other) => (null, IllegalOperation(other));
-    internal virtual (ValueF, CustomError) GetComparisonLTE(ValueF other) => (null, IllegalOperation(other));
-    internal virtual (ValueF, CustomError) GetComparisonGTE(ValueF other) => (null, IllegalOperation(other));
-    internal virtual (ValueF, CustomError) AndedBy(ValueF other) => (null, IllegalOperation(other));
-    internal virtual (ValueF, CustomError) OredBy(ValueF other) => (null, IllegalOperation(other));
-    internal virtual (ValueF, CustomError) Notted() => (null, IllegalOperation());
-    internal virtual bool isTrue() => false;
+    public virtual (ValueF, CustomError) PoweredBy(ValueF other) => (null, IllegalOperation(other));
+    public virtual (ValueF, CustomError) GetComparisonEE(ValueF other) => (null, IllegalOperation(other));
+    public virtual (ValueF, CustomError) GetComparisonNE(ValueF other) => (null, IllegalOperation(other));
+    public virtual (ValueF, CustomError) GetComparisonLT(ValueF other) => (null, IllegalOperation(other));
+    public virtual (ValueF, CustomError) GetComparisonGT(ValueF other) => (null, IllegalOperation(other));
+    public virtual (ValueF, CustomError) GetComparisonLTE(ValueF other) => (null, IllegalOperation(other));
+    public virtual (ValueF, CustomError) GetComparisonGTE(ValueF other) => (null, IllegalOperation(other));
+    public virtual (ValueF, CustomError) AndedBy(ValueF other) => (null, IllegalOperation(other));
+    public virtual (ValueF, CustomError) OredBy(ValueF other) => (null, IllegalOperation(other));
+    public virtual (ValueF, CustomError) Notted() => (null, IllegalOperation());
+    public virtual bool isTrue() => false;
+    #endregion
+
     public virtual RTResult Execute(List<ValueF> args) => new RTResult().failure(IllegalOperation());
     public CustomError IllegalOperation(ValueF other= null)
     {
@@ -1308,6 +1287,8 @@ public class Number : ValueF
     {
         return Value.ToString();
     }
+
+    #region Mathematical expresion methods
     public override (ValueF, CustomError) AddedTo(ValueF other){
         if (other is Number)
             return (new Number(Value + ((Number)other).Value).setContext(this.Context), null);
@@ -1340,77 +1321,78 @@ public class Number : ValueF
             return (null, IllegalOperation(other));
 
     }
-    internal override (ValueF, CustomError) PoweredBy(ValueF other)
+    public override (ValueF, CustomError) PoweredBy(ValueF other)
     {
         if (other is Number)
             return (new Number(MathF.Pow((float)Value, (float)((Number)other).Value)).setContext(this.Context), null);
         else
             return (null, IllegalOperation(other));
     }
-    internal override (ValueF, CustomError) GetComparisonEE(ValueF other)
+    public override (ValueF, CustomError) GetComparisonEE(ValueF other)
     {
         if (other is Number)
             return (new Number(Value == ((Number)other).Value ? 1 : 0).setContext(Context), null);
         else
             return (null, IllegalOperation(other));
     }
-    internal override (ValueF, CustomError) GetComparisonNE(ValueF other)
+    public override (ValueF, CustomError) GetComparisonNE(ValueF other)
     {
         if (other is Number)
             return (new Number(Value != ((Number)other).Value ? 1 : 0).setContext(Context), null);
         else
             return (null, IllegalOperation(other));
     }
-    internal override (ValueF, CustomError) GetComparisonLT(ValueF other)
+    public override (ValueF, CustomError) GetComparisonLT(ValueF other)
     {
         if (other is Number)
             return (new Number(Value < ((Number)other).Value ? 1 : 0).setContext(Context), null);
         else
             return (null, IllegalOperation(other));
     }
-    internal override (ValueF, CustomError) GetComparisonGT(ValueF other)
+    public override (ValueF, CustomError) GetComparisonGT(ValueF other)
     {
         if (other is Number)
             return (new Number(Value > ((Number)other).Value ? 1 : 0).setContext(Context), null);
         else
             return (null, IllegalOperation(other));
     }
-    internal override (ValueF, CustomError) GetComparisonLTE(ValueF other)
+    public override (ValueF, CustomError) GetComparisonLTE(ValueF other)
     {
         if (other is Number)
             return (new Number(Value <= ((Number)other).Value ? 1 : 0).setContext(Context), null);
         else
             return (null, IllegalOperation(other));
     }
-    internal override (ValueF, CustomError) GetComparisonGTE(ValueF other)
+    public override (ValueF, CustomError) GetComparisonGTE(ValueF other)
     {
         if (other is Number)
             return (new Number(Value >= ((Number)other).Value ? 1 : 0).setContext(Context), null);
         else
             return (null, IllegalOperation(other));
     }
-    internal override (ValueF, CustomError) AndedBy(ValueF other)
+    public override (ValueF, CustomError) AndedBy(ValueF other)
     {
         if (other is Number)
             return (new Number(Value == 1 && ((Number)other).Value == 1 ? 1 : 0).setContext(Context), null);
         else
             return (null, IllegalOperation(other));
     }
-    internal override (ValueF, CustomError) OredBy(ValueF other)
+    public override (ValueF, CustomError) OredBy(ValueF other)
     {
         if (other is Number)
             return (new Number(Value == 1 || ((Number)other).Value == 1 ? 1 : 0).setContext(Context), null);
         else
             return (null, IllegalOperation(other));
     }
-    internal override (ValueF, CustomError) Notted()
+    public override (ValueF, CustomError) Notted()
     {
         return (new Number(Value == 0? 1 : 0), null);
     }
-    internal override bool isTrue()
+    public override bool isTrue()
     {
         return Value != 0;
     }
+    #endregion
 }
 
 class Function : ValueF
@@ -1419,9 +1401,9 @@ class Function : ValueF
     Node BodyNode;
     List<string> argNames;
 
-    public Function(Node bodyNode, List<string> argNames, string name = "<anonymous>")
+    public Function(Node bodyNode, List<string> argNames, string name)
     {
-        Name = name;
+        Name = name != null ? name : "<anonymous>";
         BodyNode = bodyNode;
         this.argNames = argNames;
     }
@@ -1456,7 +1438,7 @@ class Function : ValueF
         }
 
         ValueF value = res.register(Interpreter.Visit(BodyNode, newContext));
-        if (res.error != null)
+        if (res.HasError)
             return res;
 
         return res.success(value);
@@ -1479,11 +1461,8 @@ class Function : ValueF
     }
 
 }
+#endregion
 
-
-//#################################################################
-// Context
-//#################################################################
 public class ContextHolder
 {
     public string displayName;
@@ -1499,9 +1478,6 @@ public class ContextHolder
     }
 }
 
-//#################################################################
-// SYMBOL Table
-//#################################################################
 public class SymbolTable {
     Dictionary<string, ValueF> Symbols = new Dictionary<string, ValueF>();
     SymbolTable Parent;
@@ -1544,10 +1520,6 @@ public class SymbolTable {
     }
 }
 
-
-//#################################################################
-// Interpreter
-//#################################################################
 static class Interpreter
 {
     public static RTResult Visit(Node node, ContextHolder context) {
@@ -1597,9 +1569,8 @@ static class Interpreter
 
         string varName = varAssignNode.VarNameTok.value.ToString();
         Number value = (Number)res.register(Visit(varAssignNode.ValueNode, context));
+        if (res.HasError) return res;
 
-        if (res.error != null)
-            return res;
         context.symbolTable.Set(varName, value);
         return res.success(value);
     }
@@ -1615,11 +1586,10 @@ static class Interpreter
 
 
         Number left = (Number)res.register(Visit(node.left_node, context));
-        if (res.error != null)
-            return res;
+        if (res.HasError) return res;
+
         Number right = (Number)res.register(Visit(node.right_node, context));
-        if (res.error != null)
-            return res;
+        if (res.HasError) return res;
 
         (ValueF, CustomError) result = (null, null);
 
@@ -1658,8 +1628,7 @@ static class Interpreter
 
 
         Number numb = (Number)res.register(Visit(node.node, context));
-        if (res.error != null)
-            return res;
+        if (res.HasError) return res;
 
 
         (ValueF, CustomError) result = (numb, null);
@@ -1671,10 +1640,8 @@ static class Interpreter
             result = numb.Notted();
 
 
-        if (res.error != null)
-            return res.failure(result.Item2);
-        else
-            return res.success((Number)result.Item1.SetPos(node.PosStart, node.PosEnd));
+        if (res.HasError) return res.failure(result.Item2);
+        return res.success((Number)result.Item1.SetPos(node.PosStart, node.PosEnd));
     }
     public static RTResult Visit_VarIfThenNode(VarIfThenNode node, ContextHolder context)
     {
@@ -1683,14 +1650,12 @@ static class Interpreter
         foreach((Node, Node) conNExpr in node.cases)
         {
             Number conditionValue = (Number)res.register(Visit(conNExpr.Item1, context));
-            if (res.error != null)// ERROR check
-                return res;
+            if (res.HasError) return res;
 
             if (conditionValue.isTrue())
             {
                 Number exprVal = (Number)res.register(Visit(conNExpr.Item2, context));
-                if (res.error != null)// ERROR check
-                    return res;
+                if (res.HasError) return res;
                 return res.success(exprVal);
 
             }
@@ -1698,8 +1663,7 @@ static class Interpreter
         if (node.elseCase != null)
         {
             Number elseVal = (Number)res.register(Visit(node.elseCase, context));
-            if (res.error != null)// ERROR check
-                return res;
+            if (res.HasError) return res;
             return res.success(elseVal);
         }
         return res.success(null);
@@ -1712,20 +1676,17 @@ static class Interpreter
         Number stepVal;
 
         Number startVal = (Number)res.register(Visit(node.StartValue, context));
-        if (res.error != null)
-            return res;
+        if (res.HasError) return res;
 
 
         Number endVal = (Number)res.register(Visit(node.EndValue, context));
-        if (res.error != null)
-            return res;
+        if (res.HasError) return res;
 
 
         if(node.StepVal != null)
         {
             stepVal = (Number)res.register(Visit(node.StepVal, context));
-            if (res.error != null)
-                return res;
+            if (res.HasError) return res;
         }
         else
         {
@@ -1740,8 +1701,7 @@ static class Interpreter
             i += stepVal.Value;
 
             res.register(Visit(node.BodyVal, context));
-            if (res.error != null)
-                return res;
+            if (res.HasError) return res;
         }
         return res.success(null);
 
@@ -1753,19 +1713,16 @@ static class Interpreter
         while (true)
         {
             Number condition = (Number)res.register(Visit(node.Condition, context));
-            if (res.error != null)
-                return res;
+            if (res.HasError) return res;
 
             if (!condition.isTrue())
                 break;
 
             res.register(Visit(node.BodyVal, context));
-            if (res.error != null)
-                return res;
+            if (res.HasError) return res;
         }
         return res.success(null);
     }
-
     public static RTResult Visit_FunDefNode(FunDefNode node, ContextHolder context)
     {
         RTResult res = new RTResult();
@@ -1774,14 +1731,13 @@ static class Interpreter
         Node bodyNode = node.bodyNode;
         List<string> argNames = new List<string>();
         node.argNameToks.ToList().ForEach(x => argNames.Add(x.value.ToString()));
-        Function FuncValue = (Function)new Function(bodyNode, argNames, null).setContext(context).SetPos(node.PosStart, node.PosEnd);
+        Function FuncValue = (Function)new Function(bodyNode, argNames, funName).setContext(context).SetPos(node.PosStart, node.PosEnd);
 
         if (node.tok != null)
             context.symbolTable.Set(funName, FuncValue);
 
         return res.success(FuncValue);
     }
-
     public static RTResult Visit_CallNode(CallNode node, ContextHolder context)
     {
         RTResult res = new RTResult();
@@ -1789,17 +1745,17 @@ static class Interpreter
         List<ValueF> args = new List<ValueF>();
 
         ValueF valueToCall = res.register(Visit(node.NodeToCall, context));
-        if (res.error != null) return res;
+        if (res.HasError) return res;
         valueToCall = valueToCall.Copy().SetPos(node.PosStart, node.PosEnd);
 
         foreach(Node argNode in node.argNodes)
         {
             args.Add(res.register(Visit(argNode, context)));
-            if (res.error != null) return res;
+            if (res.HasError) return res;
         }
 
         ValueF returnValue = res.register(valueToCall.Execute(args));
-        if (res.error != null) return res;
+        if (res.HasError) return res;
 
         return res.success(returnValue);
     }

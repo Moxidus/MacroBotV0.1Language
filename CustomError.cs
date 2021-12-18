@@ -4,7 +4,7 @@ using System.Text;
 
 namespace MacroBotV0._1Language
 {
-    //Custom Errors-------------------------------------------------------
+    #region Errors
     public class CustomError
     {
         public string errorName;
@@ -64,4 +64,5 @@ namespace MacroBotV0._1Language
             return "Traceback (most recent call last):\n" + result;
         }
     }
+    #endregion
 }
