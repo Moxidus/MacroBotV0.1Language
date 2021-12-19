@@ -18,6 +18,7 @@ public static class MainScript
     #region tokens constants
     public const string TT_INT = "TT_INT";
     public const string TT_FLOAT = "TT_FLOAT";
+    public const string TT_STRING = "TT_STRING";
     public const string TT_IDENTIFIER = "TT_IDENTIFIER";
     public const string TT_KEYWORD = "TT_KEYWORD";
     public const string TT_PLUS = "TT_PLUS";
@@ -56,6 +57,8 @@ public static class MainScript
         "WHILE"
     };
 
+    public static Dictionary<char, char> EscapeChars;
+
     public static (ValueF, CustomError) Run(string fn, string text)
     {
         //setting global VARIABLES
@@ -63,7 +66,9 @@ public static class MainScript
         GlobalSymbolTable.Set("TRUE", new Number(1));
         GlobalSymbolTable.Set("FALSE", new Number(0));
 
-
+        EscapeChars = new Dictionary<char, char>();
+        EscapeChars.Add('n','\n');
+        EscapeChars.Add('t','\t');
 
         //generate tokens
         Lexer lexer = new Lexer(fn, text);
@@ -144,6 +149,17 @@ public class Node
 public class NumberNode : Node
 {
     public NumberNode(Token tok) : base(tok)
+    {
+        this.PosStart = tok.posStart;
+        this.PosEnd = tok.posEnd;
+    }
+
+    public override string ToString() => tok.ToString();
+
+}
+public class StringNode : Node
+{
+    public StringNode(Token tok) : base(tok)
     {
         this.PosStart = tok.posStart;
         this.PosEnd = tok.posEnd;
@@ -433,6 +449,12 @@ class Parser
             res.registerAdvancement();
             advance();
             return res.success(new NumberNode(tok));
+        }
+        else if (MainScript.TT_STRING == tok.type)
+        {
+            res.registerAdvancement();
+            advance();
+            return res.success(new StringNode(tok));
         }
         else if (tok.type == MainScript.TT_IDENTIFIER)
         {
@@ -1008,6 +1030,9 @@ public class Lexer
             {
                 switch (current_char)
                 {
+                    case '"':
+                        tokens.Add(makeString());
+                        break;
                     case '+':
                         tokens.Add(new Token(MainScript.TT_PLUS, posStart: this.pos));
                         advance();
@@ -1075,6 +1100,34 @@ public class Lexer
 
         tokens.Add(new Token(MainScript.TT_EOF, posStart: this.pos));
         return (tokens, null);
+    }
+
+
+    private Token makeString()
+    {
+        string str = "";
+        Position posStart = pos.copy();
+        bool escapeChar = false;
+
+        advance();// Steps over starting double Quot
+
+        while(current_char != null && (current_char != '"' || escapeChar))
+        {
+            if (escapeChar)
+                str += MainScript.EscapeChars
+                    .GetValueOrDefault<char, char>
+                    ((char)current_char,
+                    (char)current_char);// if it doesnt find escape char it returns current char
+            else if (current_char == '\\')
+                escapeChar = true;
+            else
+                str += current_char;
+            advance();
+            escapeChar = false;
+        }
+        advance();// Steps over ending double Quot
+        return new Token(MainScript.TT_STRING, str, posStart, pos);
+
     }
 
     private Token makeMinusOrArrow()
@@ -1395,6 +1448,46 @@ public class Number : ValueF
     #endregion
 }
 
+public class StringValue : ValueF
+{
+    public string Value;
+
+    public StringValue(string value): base()
+    {
+        Value = value;
+    }
+
+    #region Mathematical expresion methods
+    public override (ValueF, CustomError) AddedTo(ValueF other)
+    {
+        if (other is StringValue)
+            return (new StringValue(Value + ((StringValue)other).Value), null);
+        return base.AddedTo(other);
+    }
+
+    public override (ValueF, CustomError) MultedBy(ValueF other)
+    {
+        if (other is Number)
+            return (new StringValue(String.Concat(Enumerable.Repeat(Value, (int)((Number)other).Value))), null);
+        return base.MultedBy(other);
+    }
+
+    public override bool isTrue() => Value.Length > 0;
+
+    #endregion
+
+    public override ValueF Copy()
+    {
+        StringValue copy = new StringValue(Value);
+        copy.SetPos(PosStart, PosEnd);
+        copy.setContext(Context);
+        return copy;
+    }
+
+    public override string ToString() => Value;
+
+}
+
 class Function : ValueF
 {
     string Name;
@@ -1432,7 +1525,7 @@ class Function : ValueF
         for(int i = 0; i < args.Count; i++)
         {
             string argName = argNames[i];
-            Number argValue = (Number)args[i];
+            ValueF argValue = args[i];
             argValue.setContext(Context);
             newContext.symbolTable.Set(argName, argValue);
         }
@@ -1576,8 +1669,16 @@ static class Interpreter
     }
     public static RTResult Visit_NumberNode(NumberNode node, ContextHolder context)
     {
-        return new RTResult().success((Number)new Number(node.tok.value).
+        return new RTResult().success(new Number(node.tok.value).
             setContext(context).SetPos(node.PosStart, node.PosEnd)
+            );
+    }
+    public static RTResult Visit_StringNode(StringNode node, ContextHolder context)
+    {
+        return new RTResult().success(
+            new StringValue(node.tok.value.ToString())
+            .setContext(context)
+            .SetPos(node.PosStart, node.PosEnd)
             );
     }
     public static RTResult Visit_BinOpNode(BinOpNode node, ContextHolder context)
@@ -1585,10 +1686,10 @@ static class Interpreter
         RTResult res = new RTResult();
 
 
-        Number left = (Number)res.register(Visit(node.left_node, context));
+        ValueF left = res.register(Visit(node.left_node, context));
         if (res.HasError) return res;
 
-        Number right = (Number)res.register(Visit(node.right_node, context));
+        ValueF right = res.register(Visit(node.right_node, context));
         if (res.HasError) return res;
 
         (ValueF, CustomError) result = (null, null);
@@ -1619,7 +1720,7 @@ static class Interpreter
         if (result.Item2 != null)
             return res.failure(result.Item2);
         else
-            return res.success((Number)result.Item1.SetPos(node.PosStart, node.PosEnd));
+            return res.success(result.Item1.SetPos(node.PosStart, node.PosEnd));
 
     }
     public static RTResult Visit_UnaryOpNode(UnaryOpNode node, ContextHolder context)
