@@ -117,10 +117,7 @@ public class Lexer
     void advance()
     {
         pos.advance(current_char);
-        if (pos.idx < text.Length)
-            current_char = text[pos.idx];
-        else
-            current_char = null;
+        current_char = pos.idx < text.Length ? text[pos.idx] : (char?)null;
     }
 
     Token make_number()
@@ -160,84 +157,92 @@ public class Lexer
 
         while(current_char != null)
         {
-            if (!" \t".Contains((char)current_char))
+
+            if (" \t".Contains((char)current_char))
             {
-                switch (current_char)
-                {
-                    case '"':
-                        tokens.Add(makeString());
-                        break;
-                    case '+':
-                        tokens.Add(new Token(MainScript.TT_PLUS, posStart: this.pos));
-                        advance();
-                        break;
-                    case '-':
-                        tokens.Add(makeMinusOrArrow());
-                        break;
-                    case '*':
-                        tokens.Add(new Token(MainScript.TT_MUL, posStart: this.pos));
-                        advance();
-                        break;
-                    case '/':
-                        tokens.Add(new Token(MainScript.TT_DIV, posStart: this.pos));
-                        advance();
-                        break;
-                    case '^':
-                        tokens.Add(new Token(MainScript.TT_POW, posStart: this.pos));
-                        advance();
-                        break;
-                    case '(':
-                        tokens.Add(new Token(MainScript.TT_LPAREN, posStart: this.pos));
-                        advance();
-                        break;
-                    case ')':
-                        tokens.Add(new Token(MainScript.TT_RPAREN, posStart: this.pos));
-                        advance();
-                        break;
-                    case '[':
-                        tokens.Add(new Token(MainScript.TT_LSQUARE, posStart: this.pos));
-                        advance();
-                        break;
-                    case ']':
-                        tokens.Add(new Token(MainScript.TT_RSQUARE, posStart: this.pos));
-                        advance();
-                        break;
-                    case '!':
-                        (Token, CustomError) tokNError = makeNotEquals();
-                        if (tokNError.Item2 != null)
-                            return (null, tokNError.Item2);
-                        tokens.Add(tokNError.Item1);
-                        break;
-                    case '=':
-                        tokens.Add(makeEquals());
-                        break;
-                    case '<':
-                        tokens.Add(makeLessThen());
-                        break;
-                    case '>':
-                        tokens.Add(makeGreaterThen());
-                        break;
-                    case ',':
-                        tokens.Add(new Token(MainScript.TT_COMMA, posStart: this.pos));
-                        advance();
-                        break;
-                    default:
-                        if (MainScript.DIGITS.Contains((char)current_char)){
-                            tokens.Add(make_number());
-                        } else if (MainScript.LETTERS.Contains((char)current_char)){
-                            tokens.Add(MakeIdentifier());
-                        } else
-                        {
-                            Position pos_start = pos.copy();
-                            char tempChar = (char)current_char;
-                            advance();
-                            return  (new List<Token>(), new IllegalCharError(pos_start, pos, "'" + tempChar + "'"));
-                        }
-                        break;
-                }
+                advance();
+            }
+            else if (current_char == '"')
+            {
+                tokens.Add(makeString());
+            }
+            else if (current_char == '+')
+            {
+                tokens.Add(new Token(MainScript.TT_PLUS, posStart: this.pos));
+                advance();
+            }
+            else if (current_char == '-')
+            {
+                tokens.Add(makeMinusOrArrow());
+            }
+            else if (current_char == '*')
+            {
+                tokens.Add(new Token(MainScript.TT_MUL, posStart: this.pos));
+                advance();
+            }
+            else if (current_char == '/')
+            {
+                tokens.Add(new Token(MainScript.TT_DIV, posStart: this.pos));
+                advance();
+            }
+            else if (current_char == '^')
+            {
+                tokens.Add(new Token(MainScript.TT_POW, posStart: this.pos));
+                advance();
+            }
+            else if (current_char == '(') {
+                tokens.Add(new Token(MainScript.TT_LPAREN, posStart: this.pos));
+                advance();
+            }
+            else if (current_char == ')') {
+                tokens.Add(new Token(MainScript.TT_RPAREN, posStart: this.pos));
+                advance();
+            }
+            else if (current_char == '[') {
+                tokens.Add(new Token(MainScript.TT_LSQUARE, posStart: this.pos));
+                advance();
+            }
+            else if (current_char == ']') {
+                tokens.Add(new Token(MainScript.TT_RSQUARE, posStart: this.pos));
+                advance();
+            }
+            else if (current_char == '!') {
+                (Token, CustomError) tokNError = makeNotEquals();
+                if (tokNError.Item2 != null) return (null, tokNError.Item2);
+                tokens.Add(tokNError.Item1);
+            }
+            else if (current_char == '=')
+            {
+                tokens.Add(makeEquals());
+            }
+            else if (current_char == '<')
+            {
+                tokens.Add(makeLessThen());
+            }
+            else if (current_char == '>')
+            {
+                tokens.Add(makeGreaterThen());
+            }
+            else if (current_char == ',')
+            {
+                tokens.Add(new Token(MainScript.TT_COMMA, posStart: this.pos));
+                advance();
+            }
+            else if (MainScript.DIGITS.Contains((char)current_char))
+            { 
+                tokens.Add(make_number());
+            }
+            else if (MainScript.LETTERS.Contains((char)current_char))
+            {
+                tokens.Add(MakeIdentifier());
             }
             else
+            {
+                Position pos_start = pos.copy();
+                char tempChar = (char)current_char;
                 advance();
+                return (new List<Token>(), new IllegalCharError(pos_start, pos, "'" + tempChar + "'"));
+            }
         }
 
         tokens.Add(new Token(MainScript.TT_EOF, posStart: this.pos));
@@ -1519,7 +1524,6 @@ public class Number : ValueF
     }
     #endregion
 }
-
 public class StringValue : ValueF
 {
     public string Value;
@@ -1554,6 +1558,11 @@ public class StringValue : ValueF
         copy.SetPos(PosStart, PosEnd);
         copy.setContext(Context);
         return copy;
+    }
+
+    public override (ValueF, CustomError) GetComparisonEE(ValueF other)
+    {
+        return base.GetComparisonEE(other);
     }
 
     public override string ToString() => Value;
@@ -1616,17 +1625,19 @@ public class ListValue : ValueF
     public override string ToString()
     {
         string ret = "[";
-        foreach(ValueF val in Elements)
+        for(int i = 0; i < Elements.Count; i++)
         {
-            ret += (val.ToString()) + ", ";
+
+            ret += (Elements[i].ToString());
+
+            ret += i == Elements.Count - 1 ? "" : ", ";
         }
-        ret = ret.Substring(0, ret.Length - 2);
 
         ret += "]";
 
 
         return ret;
-    }
+    }   
 
 }
 public class Function : ValueF
@@ -1891,12 +1902,12 @@ static class Interpreter
 
         foreach((Node, Node) conNExpr in node.cases)
         {
-            Number conditionValue = (Number)res.register(Visit(conNExpr.Item1, context));
+            ValueF conditionValue = res.register(Visit(conNExpr.Item1, context));
             if (res.HasError) return res;
 
             if (conditionValue.isTrue())
             {
-                Number exprVal = (Number)res.register(Visit(conNExpr.Item2, context));
+                ValueF exprVal = res.register(Visit(conNExpr.Item2, context));
                 if (res.HasError) return res;
                 return res.success(exprVal);
 
