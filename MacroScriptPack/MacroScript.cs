@@ -29,6 +29,8 @@ public static class MainScript
     public const string TT_EQ = "TT_EQ";
     public const string TT_LPAREN = "TT_LPAREN";
     public const string TT_RPAREN = "TT_RPAREN";
+    public const string TT_LSQUARE = "TT_LSQUARE";
+    public const string TT_RSQUARE = "TT_RSQUARE";
     public const string TT_EE = "TT_EE";
     public const string TT_NE = "TT_NE";
     public const string TT_LT = "TT_LT";
@@ -97,6 +99,275 @@ public static class MainScript
 
 }
 
+public class Lexer
+{
+    string text;
+    Position pos;
+    char? current_char;
+    string fn;
+
+    public Lexer(string fn, string text)
+    {
+        this.fn = fn;
+        this.text = text;
+        this.pos = new Position(-1, 0, -1, fn, text);
+        this.current_char = null;
+        advance();
+    }
+    void advance()
+    {
+        pos.advance(current_char);
+        if (pos.idx < text.Length)
+            current_char = text[pos.idx];
+        else
+            current_char = null;
+    }
+
+    Token make_number()
+    {
+        string numb_str = "";
+        int dot_count = 0;
+        Position posStart = pos.copy();
+
+        while (current_char != null && (MainScript.DIGITS + ".").Contains((char)current_char))
+        {
+            if (current_char == '.')
+            {
+                if (dot_count == 1)
+                    break;
+                dot_count += 1;
+                numb_str += ".";
+            }
+            else
+            {
+                numb_str += current_char;
+            }
+            advance();
+        }
+
+        if (dot_count == 0)
+            return new Token(MainScript.TT_INT, Int32.Parse(numb_str), posStart, this.pos);
+        else
+        {
+            return new Token(MainScript.TT_FLOAT, float.Parse(numb_str), posStart, this.pos);
+        }
+
+    }
+
+    public (List<Token>, CustomError) make_tokens()
+    {
+        List<Token> tokens = new List<Token>();
+
+        while(current_char != null)
+        {
+            if (!" \t".Contains((char)current_char))
+            {
+                switch (current_char)
+                {
+                    case '"':
+                        tokens.Add(makeString());
+                        break;
+                    case '+':
+                        tokens.Add(new Token(MainScript.TT_PLUS, posStart: this.pos));
+                        advance();
+                        break;
+                    case '-':
+                        tokens.Add(makeMinusOrArrow());
+                        break;
+                    case '*':
+                        tokens.Add(new Token(MainScript.TT_MUL, posStart: this.pos));
+                        advance();
+                        break;
+                    case '/':
+                        tokens.Add(new Token(MainScript.TT_DIV, posStart: this.pos));
+                        advance();
+                        break;
+                    case '^':
+                        tokens.Add(new Token(MainScript.TT_POW, posStart: this.pos));
+                        advance();
+                        break;
+                    case '(':
+                        tokens.Add(new Token(MainScript.TT_LPAREN, posStart: this.pos));
+                        advance();
+                        break;
+                    case ')':
+                        tokens.Add(new Token(MainScript.TT_RPAREN, posStart: this.pos));
+                        advance();
+                        break;
+                    case '[':
+                        tokens.Add(new Token(MainScript.TT_LSQUARE, posStart: this.pos));
+                        advance();
+                        break;
+                    case ']':
+                        tokens.Add(new Token(MainScript.TT_RSQUARE, posStart: this.pos));
+                        advance();
+                        break;
+                    case '!':
+                        (Token, CustomError) tokNError = makeNotEquals();
+                        if (tokNError.Item2 != null)
+                            return (null, tokNError.Item2);
+                        tokens.Add(tokNError.Item1);
+                        break;
+                    case '=':
+                        tokens.Add(makeEquals());
+                        break;
+                    case '<':
+                        tokens.Add(makeLessThen());
+                        break;
+                    case '>':
+                        tokens.Add(makeGreaterThen());
+                        break;
+                    case ',':
+                        tokens.Add(new Token(MainScript.TT_COMMA, posStart: this.pos));
+                        advance();
+                        break;
+                    default:
+                        if (MainScript.DIGITS.Contains((char)current_char)){
+                            tokens.Add(make_number());
+                        } else if (MainScript.LETTERS.Contains((char)current_char)){
+                            tokens.Add(MakeIdentifier());
+                        } else
+                        {
+                            Position pos_start = pos.copy();
+                            char tempChar = (char)current_char;
+                            advance();
+                            return  (new List<Token>(), new IllegalCharError(pos_start, pos, "'" + tempChar + "'"));
+                        }
+                        break;
+                }
+            }
+            else
+                advance();
+        }
+
+        tokens.Add(new Token(MainScript.TT_EOF, posStart: this.pos));
+        return (tokens, null);
+    }
+
+
+    private Token makeString()
+    {
+        string str = "";
+        Position posStart = pos.copy();
+        bool escapeChar = false;
+
+        advance();// Steps over starting double Quot
+
+        while(current_char != null && (current_char != '"' || escapeChar))
+        {
+            if (escapeChar)
+                str += MainScript.EscapeChars
+                    .GetValueOrDefault<char, char>
+                    ((char)current_char,
+                    (char)current_char);// if it doesnt find escape char it returns current char
+            else if (current_char == '\\')
+                escapeChar = true;
+            else
+                str += current_char;
+            advance();
+            escapeChar = false;
+        }
+        advance();// Steps over ending double Quot
+        return new Token(MainScript.TT_STRING, str, posStart, pos);
+
+    }
+
+    private Token makeMinusOrArrow()
+    {
+        string tokenType = MainScript.TT_MINUS;
+        Position posStart = this.pos.copy();
+        advance();
+
+        if (current_char == '>')
+        {
+            advance();
+            tokenType = MainScript.TT_ARROW;
+        }
+
+        return new Token(tokenType, posStart: posStart, posEnd: pos);
+    }
+
+    private Token makeGreaterThen()
+    {
+        string tokenType = MainScript.TT_GT;
+        Position posStart = this.pos.copy();
+        advance();
+
+        if (current_char == '=')
+        {
+            advance();
+            tokenType = MainScript.TT_GTE;
+        }
+
+        return new Token(tokenType, posStart: posStart, posEnd: pos);
+    }
+
+    private Token makeLessThen()
+    {
+        string tokenType = MainScript.TT_LT;
+        Position posStart = this.pos.copy();
+        advance();
+
+        if (current_char == '=')
+        {
+            advance();
+            tokenType = MainScript.TT_LTE;
+        }
+
+        return new Token(tokenType, posStart: posStart, posEnd: pos);
+    }
+
+    private Token makeEquals()
+    {
+        string tokenType = MainScript.TT_EQ;
+        Position posStart = this.pos.copy();
+        advance();
+
+        if (current_char == '=')
+        {
+            advance();
+            tokenType = MainScript.TT_EE;
+        }
+
+        return new Token(tokenType, posStart: posStart, posEnd: pos);
+    }
+
+
+    private (Token, CustomError) makeNotEquals()
+    {
+        Position posStart = this.pos.copy();
+        advance();
+
+        if(current_char == '=')
+        {
+            advance();
+            return (new Token(MainScript.TT_NE, posStart, pos), null);
+        }
+
+        advance();
+        return (null, new ExpectedCharError(posStart, pos, "'=' (after '!')"));
+    }
+
+    private Token MakeIdentifier()
+    {
+        string idStr = "";
+        Position posStart = pos.copy();
+
+        while (current_char != null && MainScript.LETTERS_DIGITS.Contains((char)current_char)) {
+            idStr += current_char;
+            advance();
+        }
+        //TODO: keywords. cointain idStr
+        string tokType;
+        if (MainScript.KEYWORDS.Any(x => x == idStr))
+            tokType = MainScript.TT_KEYWORD;
+        else
+            tokType = MainScript.TT_IDENTIFIER;
+
+        return new Token(tokType, idStr, posStart, pos);
+
+    }
+}
 
 #region RunTime Result
 public class RTResult
@@ -317,6 +588,17 @@ public class CallNode : Node
     }
     //public override string ToString() => $"({tok}, {node})";
 }
+public class ListNode:Node
+{
+    public List<Node> ElementNodes;
+
+    public ListNode(List<Node> elementNodes, Position posStart, Position posEnd):base(null)
+    {
+        ElementNodes = elementNodes;
+        PosStart = posStart;
+        PosEnd = posEnd;
+    }
+}
 #endregion
 
 class ParseResult
@@ -415,7 +697,7 @@ class Parser
                 if (res.HasError)
                     return res.failure(new InvalidSyntaxError(
                         current_tok.posStart, current_tok.posEnd,
-                        "Expected 'VAR', int, float, identifier, '+', '-', ')' , or '('"));
+                        "Expected 'VAR', int, float, identifier, '+', '-', ')', '[' or '('"));
             }
 
             while(current_tok.type == MainScript.TT_COMMA)
@@ -483,6 +765,12 @@ class Parser
                     "Expected ')'"));
             }
         }
+        else if (tok.type == MainScript.TT_LSQUARE)
+        {
+            Node listExprTemp = res.register(listExpr());
+            if (res.HasError) return res;
+            return res.success(listExprTemp);
+        }
         else if (current_tok.Matches(MainScript.TT_KEYWORD, "IF"))//checks for if expresions
         {
             Node ifExprtemp = res.register(ifExpr());
@@ -517,7 +805,53 @@ class Parser
             new InvalidSyntaxError(
                 tok.posStart,
                 tok.posEnd,
-                "Expected int, float, identifier, \"+\", \"-\" or \"(\""));
+                "Expected int, float, identifier, \"[\", \"+\", \"-\" or \"(\""));
+    }
+
+    private ParseResult listExpr()
+    {
+        ParseResult res = new ParseResult();
+
+        List<Node> elementNode = new List<Node>();
+        Position posStart = current_tok.posStart.copy();
+
+        res.registerAdvancement();// steps over '['
+        advance();
+
+
+        if (current_tok.type == MainScript.TT_RSQUARE)
+        {
+            res.registerAdvancement();
+            advance();
+        }
+        else
+        {
+            elementNode.Add(res.register(expr()));// Adds the first parameter if it exists
+            if (res.HasError)
+                return res.failure(new InvalidSyntaxError(
+                    current_tok.posStart, current_tok.posEnd,
+                    "Expected 'VAR', int, float, identifier, '+', '-', ']', '[' or '('"));
+
+
+            while (current_tok.type == MainScript.TT_COMMA)
+            {
+                res.registerAdvancement();// Steps over COMMA
+                advance();
+
+                elementNode.Add(res.register(expr()));
+                if (res.HasError) return res; // Ends if Error was founds
+            }
+
+            if (current_tok.type != MainScript.TT_RSQUARE)
+                return res.failure(new InvalidSyntaxError(
+                    current_tok.posStart, current_tok.posEnd,
+                    "Expected ',' or ']'"));
+
+            res.registerAdvancement();// Steps over ']'
+            advance();
+        }
+        return res.success(new ListNode(elementNode, posStart, current_tok.posStart.copy()));
+
     }
 
     private ParseResult Fundef()
@@ -862,7 +1196,7 @@ class Parser
         if (res.HasError)
             return res.failure(new InvalidSyntaxError(
                 current_tok.posStart, current_tok.posEnd,
-                "Expected 'VAR', int, float, identifier, '+', '-', or '('"));
+                "Expected 'VAR', int, float, identifier, '+', '-', '[' or '('"));
 
         return res.success(node);
     }
@@ -890,7 +1224,7 @@ class Parser
                 new InvalidSyntaxError(
                     node.PosStart,
                     node.PosEnd,
-                    "Expected int, float, identifier, '+', '-', '(' or ''"));
+                    "Expected int, float, identifier, '+', '-', '(', '[' or ''"));
 
         return res.success(node);
 
@@ -963,268 +1297,6 @@ public class Position
         return new Position(idx, ln, col, fn, ftxt);
     }
 
-}
-
-public class Lexer
-{
-    string text;
-    Position pos;
-    char? current_char;
-    string fn;
-
-    public Lexer(string fn, string text)
-    {
-        this.fn = fn;
-        this.text = text;
-        this.pos = new Position(-1, 0, -1, fn, text);
-        this.current_char = null;
-        advance();
-    }
-    void advance()
-    {
-        pos.advance(current_char);
-        if (pos.idx < text.Length)
-            current_char = text[pos.idx];
-        else
-            current_char = null;
-    }
-
-    Token make_number()
-    {
-        string numb_str = "";
-        int dot_count = 0;
-        Position posStart = pos.copy();
-
-        while (current_char != null && (MainScript.DIGITS + ".").Contains((char)current_char))
-        {
-            if (current_char == '.')
-            {
-                if (dot_count == 1)
-                    break;
-                dot_count += 1;
-                numb_str += ".";
-            }
-            else
-            {
-                numb_str += current_char;
-            }
-            advance();
-        }
-
-        if (dot_count == 0)
-            return new Token(MainScript.TT_INT, Int32.Parse(numb_str), posStart, this.pos);
-        else
-        {
-            return new Token(MainScript.TT_FLOAT, float.Parse(numb_str), posStart, this.pos);
-        }
-
-    }
-
-    public (List<Token>, CustomError) make_tokens()
-    {
-        List<Token> tokens = new List<Token>();
-
-        while(current_char != null)
-        {
-            if (!" \t".Contains((char)current_char))
-            {
-                switch (current_char)
-                {
-                    case '"':
-                        tokens.Add(makeString());
-                        break;
-                    case '+':
-                        tokens.Add(new Token(MainScript.TT_PLUS, posStart: this.pos));
-                        advance();
-                        break;
-                    case '-':
-                        tokens.Add(makeMinusOrArrow());
-                        break;
-                    case '*':
-                        tokens.Add(new Token(MainScript.TT_MUL, posStart: this.pos));
-                        advance();
-                        break;
-                    case '/':
-                        tokens.Add(new Token(MainScript.TT_DIV, posStart: this.pos));
-                        advance();
-                        break;
-                    case '^':
-                        tokens.Add(new Token(MainScript.TT_POW, posStart: this.pos));
-                        advance();
-                        break;
-                    case '(':
-                        tokens.Add(new Token(MainScript.TT_LPAREN, posStart: this.pos));
-                        advance();
-                        break;
-                    case ')':
-                        tokens.Add(new Token(MainScript.TT_RPAREN, posStart: this.pos));
-                        advance();
-                        break;
-                    case '!':
-                        (Token, CustomError) tokNError = makeNotEquals();
-                        if (tokNError.Item2 != null)
-                            return (null, tokNError.Item2);
-                        tokens.Add(tokNError.Item1);
-                        break;
-                    case '=':
-                        tokens.Add(makeEquals());
-                        break;
-                    case '<':
-                        tokens.Add(makeLessThen());
-                        break;
-                    case '>':
-                        tokens.Add(makeGreaterThen());
-                        break;
-                    case ',':
-                        tokens.Add(new Token(MainScript.TT_COMMA, posStart: this.pos));
-                        advance();
-                        break;
-                    default:
-                        if (MainScript.DIGITS.Contains((char)current_char)){
-                            tokens.Add(make_number());
-                        } else if (MainScript.LETTERS.Contains((char)current_char)){
-                            tokens.Add(MakeIdentifier());
-                        } else
-                        {
-                            Position pos_start = pos.copy();
-                            char tempChar = (char)current_char;
-                            advance();
-                            return  (new List<Token>(), new IllegalCharError(pos_start, pos, "'" + tempChar + "'"));
-                        }
-                        break;
-                }
-            }
-            else
-                advance();
-        }
-
-        tokens.Add(new Token(MainScript.TT_EOF, posStart: this.pos));
-        return (tokens, null);
-    }
-
-
-    private Token makeString()
-    {
-        string str = "";
-        Position posStart = pos.copy();
-        bool escapeChar = false;
-
-        advance();// Steps over starting double Quot
-
-        while(current_char != null && (current_char != '"' || escapeChar))
-        {
-            if (escapeChar)
-                str += MainScript.EscapeChars
-                    .GetValueOrDefault<char, char>
-                    ((char)current_char,
-                    (char)current_char);// if it doesnt find escape char it returns current char
-            else if (current_char == '\\')
-                escapeChar = true;
-            else
-                str += current_char;
-            advance();
-            escapeChar = false;
-        }
-        advance();// Steps over ending double Quot
-        return new Token(MainScript.TT_STRING, str, posStart, pos);
-
-    }
-
-    private Token makeMinusOrArrow()
-    {
-        string tokenType = MainScript.TT_MINUS;
-        Position posStart = this.pos.copy();
-        advance();
-
-        if (current_char == '>')
-        {
-            advance();
-            tokenType = MainScript.TT_ARROW;
-        }
-
-        return new Token(tokenType, posStart: posStart, posEnd: pos);
-    }
-
-    private Token makeGreaterThen()
-    {
-        string tokenType = MainScript.TT_GT;
-        Position posStart = this.pos.copy();
-        advance();
-
-        if (current_char == '=')
-        {
-            advance();
-            tokenType = MainScript.TT_GTE;
-        }
-
-        return new Token(tokenType, posStart: posStart, posEnd: pos);
-    }
-
-    private Token makeLessThen()
-    {
-        string tokenType = MainScript.TT_LT;
-        Position posStart = this.pos.copy();
-        advance();
-
-        if (current_char == '=')
-        {
-            advance();
-            tokenType = MainScript.TT_LTE;
-        }
-
-        return new Token(tokenType, posStart: posStart, posEnd: pos);
-    }
-
-    private Token makeEquals()
-    {
-        string tokenType = MainScript.TT_EQ;
-        Position posStart = this.pos.copy();
-        advance();
-
-        if (current_char == '=')
-        {
-            advance();
-            tokenType = MainScript.TT_EE;
-        }
-
-        return new Token(tokenType, posStart: posStart, posEnd: pos);
-    }
-
-
-    private (Token, CustomError) makeNotEquals()
-    {
-        Position posStart = this.pos.copy();
-        advance();
-
-        if(current_char == '=')
-        {
-            advance();
-            return (new Token(MainScript.TT_NE, posStart, pos), null);
-        }
-
-        advance();
-        return (null, new ExpectedCharError(posStart, pos, "'=' (after '!')"));
-    }
-
-    private Token MakeIdentifier()
-    {
-        string idStr = "";
-        Position posStart = pos.copy();
-
-        while (current_char != null && MainScript.LETTERS_DIGITS.Contains((char)current_char)) {
-            idStr += current_char;
-            advance();
-        }
-        //TODO: keywords. cointain idStr
-        string tokType;
-        if (MainScript.KEYWORDS.Any(x => x == idStr))
-            tokType = MainScript.TT_KEYWORD;
-        else
-            tokType = MainScript.TT_IDENTIFIER;
-
-        return new Token(tokType, idStr, posStart, pos);
-
-    }
 }
 
 public class Token
@@ -1487,8 +1559,77 @@ public class StringValue : ValueF
     public override string ToString() => Value;
 
 }
+public class ListValue : ValueF
+{
+    public List<ValueF> Elements;
 
-class Function : ValueF
+    public ListValue(List<ValueF> elements):base()
+    {
+        Elements = elements;
+    }
+
+    public override (ValueF, CustomError) AddedTo(ValueF other)
+    {
+        if(other is ListValue)
+        {
+
+            List<ValueF> newList = Elements.ToArray().ToList<ValueF>();
+            newList = newList.Concat<ValueF>(((ListValue)other).Elements).ToList();
+            return (new ListValue(newList), null);
+        }
+        else
+        {
+            List<ValueF> newList = Elements.ToArray().ToList<ValueF>();
+            newList.Add(other);
+            return (new ListValue(newList), null);
+        }
+    }
+
+    public override (ValueF, CustomError) SubbedBy(ValueF other)
+    {
+        if (other is Number)
+        {
+            List<ValueF> newList = Elements.ToArray().ToList<ValueF>();
+            newList.RemoveAt((int)((Number)other).Value);// TODO: error if not found
+            return (new ListValue(newList), null);
+        }
+        return base.SubbedBy(other);
+    }
+
+    public override (ValueF, CustomError) DivBy(ValueF other)
+    {
+        if(other is Number)
+        {
+            return (Elements[(int)((Number)other).Value], null);//TODO: if not found return error
+        }
+        return base.DivBy(other);
+    }
+
+    public override ValueF Copy()
+    {
+        ListValue copy = new ListValue(Elements.ToArray().ToList());
+        copy.SetPos(PosStart, PosEnd);
+        copy.setContext(Context);
+        return copy;
+    }
+
+    public override string ToString()
+    {
+        string ret = "[";
+        foreach(ValueF val in Elements)
+        {
+            ret += (val.ToString()) + ", ";
+        }
+        ret = ret.Substring(0, ret.Length - 2);
+
+        ret += "]";
+
+
+        return ret;
+    }
+
+}
+public class Function : ValueF
 {
     string Name;
     Node BodyNode;
@@ -1661,7 +1802,7 @@ static class Interpreter
         Console.WriteLine(varAssignNode.VarNameTok.ToString());
 
         string varName = varAssignNode.VarNameTok.value.ToString();
-        Number value = (Number)res.register(Visit(varAssignNode.ValueNode, context));
+        ValueF value = res.register(Visit(varAssignNode.ValueNode, context));
         if (res.HasError) return res;
 
         context.symbolTable.Set(varName, value);
@@ -1859,5 +2000,20 @@ static class Interpreter
         if (res.HasError) return res;
 
         return res.success(returnValue);
+    }
+    public static RTResult Visit_ListNode(ListNode node, ContextHolder context)
+    {
+        RTResult res = new RTResult();
+        List<ValueF> elements = new List<ValueF>();
+
+        foreach(Node elNode in node.ElementNodes)
+        {
+            elements.Add(res.register(Visit(elNode, context)));
+            if (res.HasError) return res;
+        }
+
+        return res.success(new ListValue(elements)
+            .setContext(context)
+            .SetPos(node.PosStart, node.PosEnd));
     }
 }
