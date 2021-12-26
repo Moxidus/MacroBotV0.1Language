@@ -64,9 +64,9 @@ public static class MainScript
     public static (ValueF, CustomError) Run(string fn, string text)
     {
         //setting global VARIABLES
-        GlobalSymbolTable.Set("NULL", new Number(0));
-        GlobalSymbolTable.Set("TRUE", new Number(1));
-        GlobalSymbolTable.Set("FALSE", new Number(0));
+        GlobalSymbolTable.Set("NULL", new SpecialValue(SpecialValue.SpecialType.NullVal));
+        GlobalSymbolTable.Set("TRUE", new SpecialValue(SpecialValue.SpecialType.TrueVal));
+        GlobalSymbolTable.Set("FALSE", new SpecialValue(SpecialValue.SpecialType.FalseVal));
 
         EscapeChars = new Dictionary<char, char>();
         EscapeChars.Add('n','\n');
@@ -1396,6 +1396,84 @@ public class ValueF
             Context);
     }
 }
+public class SpecialValue: ValueF
+{
+    public enum SpecialType
+    {
+        NullVal, TrueVal, FalseVal
+    }
+    public SpecialType TypeVal;
+
+    public SpecialValue(SpecialType value) : base()
+    {
+        this.TypeVal = value;
+    }
+    public override ValueF Copy()
+    {
+        SpecialValue copy = new SpecialValue(TypeVal);
+        copy.SetPos(PosStart, PosEnd);
+        copy.setContext(Context);
+        return copy;
+    }
+    public override string ToString()
+    {
+        switch (TypeVal)
+        {
+            case SpecialType.TrueVal: return "TRUE";
+            case SpecialType.FalseVal: return "FALSE";
+            case SpecialType.NullVal: return "NULL";
+            default: return base.ToString();
+        }
+    }
+
+    #region Mathematical expresion methods //TODO: make errors returning null exeptions or returning false
+    public override (ValueF, CustomError) AddedTo(ValueF other)
+    {
+        if (other is SpecialValue && TypeVal == SpecialType.NullVal)//If im null i return the other value
+            return (other.Copy().setContext(this.Context), null);
+        else
+            return (null, IllegalOperation(other));
+    }
+    public override (ValueF, CustomError) GetComparisonEE(ValueF other)
+    {
+        if (other is SpecialValue)
+            return (new SpecialValue(TypeVal == ((SpecialValue)other).TypeVal ? SpecialType.TrueVal : SpecialType.FalseVal).setContext(Context), null);
+        else
+            return (new SpecialValue(SpecialType.FalseVal).setContext(Context), null);
+    }
+    public override (ValueF, CustomError) AndedBy(ValueF other)
+    {
+        if (other is SpecialValue)
+            return (new SpecialValue(TypeVal == SpecialType.TrueVal && ((SpecialValue)other).TypeVal == SpecialType.TrueVal ? SpecialType.TrueVal : SpecialType.FalseVal).setContext(Context), null);
+        else
+            return (null, IllegalOperation(other));
+    }
+    public override (ValueF, CustomError) OredBy(ValueF other)
+    {
+        if (other is SpecialValue)
+            return (new SpecialValue(TypeVal == SpecialType.TrueVal || ((SpecialValue)other).TypeVal == SpecialType.TrueVal ? SpecialType.TrueVal : SpecialType.FalseVal).setContext(Context), null);
+        else
+            return (null, IllegalOperation(other));
+    }
+    public override (ValueF, CustomError) Notted()
+    {
+        if (TypeVal != SpecialType.NullVal)
+            return (
+                TypeVal == SpecialType.TrueVal?
+                new SpecialValue(SpecialType.FalseVal) : 
+                new SpecialValue(SpecialType.FalseVal)
+                , null);
+        return base.Notted();
+    }
+    public override bool isTrue()
+    {
+        if (TypeVal != SpecialType.NullVal)
+            return TypeVal == SpecialType.TrueVal;
+        return base.isTrue();
+    }
+    #endregion
+
+}
 
 public class Number : ValueF
 {
@@ -1880,7 +1958,7 @@ static class Interpreter
         RTResult res = new RTResult();
 
 
-        Number numb = (Number)res.register(Visit(node.node, context));
+        ValueF numb = res.register(Visit(node.node, context));
         if (res.HasError) return res;
 
 
@@ -1894,7 +1972,7 @@ static class Interpreter
 
 
         if (res.HasError) return res.failure(result.Item2);
-        return res.success((Number)result.Item1.SetPos(node.PosStart, node.PosEnd));
+        return res.success(result.Item1.SetPos(node.PosStart, node.PosEnd));
     }
     public static RTResult Visit_VarIfThenNode(VarIfThenNode node, ContextHolder context)
     {
