@@ -13,6 +13,7 @@ Some errors override old errors even tho they are correct
 fun parameters should have its own parent
 using VAR keyword everytime to create variable is dumb
 you can create global variable when adding it to arguments of FOR cycle
+ITS OK ITS NOT A BUG BUT A FEATURE!
  */
 
 public static class MainScript
