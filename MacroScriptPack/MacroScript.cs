@@ -5,6 +5,16 @@ using System.Globalization;
 using System.Reflection;
 using System.Linq;
 
+
+//List of broken things:
+/*
+Context doesnt know about perent contexts and it just looks at it self
+Some errors override old errors even tho they are correct
+fun parameters should have its own parent
+using VAR keyword everytime to create variable is dumb
+you can create global variable when adding it to arguments of FOR cycle
+ */
+
 public static class MainScript
 {
     //Global symbol table
@@ -67,6 +77,8 @@ public static class MainScript
         GlobalSymbolTable.Set("NULL", new SpecialValue(SpecialValue.SpecialType.NullVal));
         GlobalSymbolTable.Set("TRUE", new SpecialValue(SpecialValue.SpecialType.TrueVal));
         GlobalSymbolTable.Set("FALSE", new SpecialValue(SpecialValue.SpecialType.FalseVal));
+        //setting built-in FUNCTIONS
+        GlobalSymbolTable.Set("PRINT", new BuiltInFun("print"));
 
         EscapeChars = new Dictionary<char, char>();
         EscapeChars.Add('n','\n');
@@ -621,8 +633,10 @@ class ParseResult
 
     public Node register(ParseResult res) {
         advanceCount += res.advanceCount;
-        if (res.HasError)
+        if (res.HasError) { 
             this.error = res.error;
+            this.HasError = true;
+        }
         return res.node;
     }
 
@@ -786,8 +800,7 @@ class Parser
         else if (current_tok.Matches(MainScript.TT_KEYWORD, "FOR"))
         {
             Node forExprtemp = res.register(forExpr());
-            if (res.HasError)// ERROR check
-                return res;
+            if (res.HasError) return res;
             return res.success(forExprtemp);
         }
         else if (current_tok.Matches(MainScript.TT_KEYWORD, "WHILE"))
@@ -1223,13 +1236,15 @@ class Parser
         }
 
         Node node = res.register(binOp(arithExpr, new (string, string)[] {(MainScript.TT_EE, null), (MainScript.TT_NE, null), (MainScript.TT_LT, null), (MainScript.TT_GT, null), (MainScript.TT_GTE, null), (MainScript.TT_LTE, null) }));
+        if (res.HasError) return res;
 
-        if (res.HasError)
+        //this causes problesm
+        /*if (res.HasError)
             return res.failure(
                 new InvalidSyntaxError(
                     node.PosStart,
                     node.PosEnd,
-                    "Expected int, float, identifier, '+', '-', '(', '[' or ''"));
+                    "Expected int, float, identifier, '+', '-', '(', '[' or ''"));*/
 
         return res.success(node);
 
@@ -1474,7 +1489,6 @@ public class SpecialValue: ValueF
     #endregion
 
 }
-
 public class Number : ValueF
 {
     public float? Value;
@@ -1718,25 +1732,24 @@ public class ListValue : ValueF
     }   
 
 }
-public class Function : ValueF
-{
-    string Name;
-    Node BodyNode;
-    List<string> argNames;
 
-    public Function(Node bodyNode, List<string> argNames, string name)
+public class BaseFunction : ValueF
+{
+    protected string Name;
+    public BaseFunction(string name):base()
     {
         Name = name != null ? name : "<anonymous>";
-        BodyNode = bodyNode;
-        this.argNames = argNames;
     }
 
-    public override RTResult Execute(List<ValueF> args)//POTENTIAL ERROR: not sure what type this arg is supossed to be
+    protected ContextHolder GenerateNewContext()
+    {
+        ContextHolder newContext = new ContextHolder(Name, Context, PosStart);
+        newContext.symbolTable = new SymbolTable(newContext.parent.symbolTable);
+        return newContext;
+    }
+    protected RTResult CheckArgs(List<string> argNames, List<ValueF> args)
     {
         RTResult res = new RTResult();
-        ContextHolder newContext = new ContextHolder( Name, Context, PosStart);
-        newContext.symbolTable = new SymbolTable(newContext.parent.symbolTable);
-
         if (args.Count > argNames.Count)
             return res.failure(
                 new RTError(
@@ -1752,24 +1765,58 @@ public class Function : ValueF
                     $"{argNames.Count - args.Count} too few args passed into {Name}",
                     Context));
 
-        for(int i = 0; i < args.Count; i++)
+        return res.success(null);
+    }
+    protected void PopulateArgs(List<string> argNames, List<ValueF> args, ContextHolder execCtx)
+    {
+        for (int i = 0; i < args.Count; i++)
         {
             string argName = argNames[i];
             ValueF argValue = args[i];
-            argValue.setContext(Context);
-            newContext.symbolTable.Set(argName, argValue);
+            argValue.setContext(execCtx);
+            execCtx.symbolTable.Set(argName, argValue);
         }
+    }
+    protected RTResult CheckAndPopulateArgs(List<string> argNames, List<ValueF> args, ContextHolder execCtx)
+    {
+        RTResult res = new RTResult();
+        res.register(CheckArgs(argNames, args));
+        if (res.HasError) return res;
+        PopulateArgs(argNames, args, execCtx);
+        return res.success(null);
+    }
 
-        ValueF value = res.register(Interpreter.Visit(BodyNode, newContext));
-        if (res.HasError)
-            return res;
+
+}
+
+public class Function : BaseFunction
+{
+    Node BodyNode;
+    List<string> ArgNames;
+
+    public Function(Node bodyNode, List<string> argNames, string name):base(name)
+    {
+        BodyNode = bodyNode;
+        this.ArgNames = argNames;
+    }
+
+    public override RTResult Execute(List<ValueF> args)//POTENTIAL ERROR: not sure what type this arg is supossed to be
+    {
+        RTResult res = new RTResult();
+        ContextHolder execCtx = GenerateNewContext();
+
+        res.register(CheckAndPopulateArgs(ArgNames, args, execCtx));
+        if (res.HasError) return res;
+
+        ValueF value = res.register(Interpreter.Visit(BodyNode, execCtx));
+        if (res.HasError) return res;
 
         return res.success(value);
     }
 
     public override ValueF Copy()
     {
-        ValueF copy = new Function(BodyNode, argNames, Name);
+        ValueF copy = new Function(BodyNode, ArgNames, Name);
 
         copy.setContext(Context);
 
@@ -1782,6 +1829,67 @@ public class Function : ValueF
     {
         return $"<function {Name}>";
     }
+
+}
+
+public class BuiltInFun : BaseFunction
+{
+    Dictionary<string, List<string>> argNamesDictionary = new Dictionary<string, List<string>>();
+    public BuiltInFun(string name) : base(name)
+    {
+        //Dictionary of arguments
+        argNamesDictionary.Add("print", new List<string>(new string[] { "value"}));
+
+    }
+
+    public override RTResult Execute(List<ValueF> args)
+    {
+        RTResult res = new RTResult();
+        ContextHolder execCtx = GenerateNewContext();
+
+        string methodName = $"execute_{Name}";
+
+
+        Type thisType = typeof(BuiltInFun);
+        MethodInfo theMethod = thisType.GetMethod(methodName);
+
+        if (theMethod == null)
+        {
+            NoVisitMethod(methodName);
+            return null;
+        }
+
+        res.register(CheckAndPopulateArgs(argNamesDictionary[Name], args, execCtx));
+        if (res.HasError) return res;
+
+        
+        RTResult result = (RTResult)theMethod.Invoke(null, new object[] { execCtx });//executes method based on Name
+        ValueF returnVal = res.register(result);
+        if (res.HasError) return res;
+
+        return res.success(returnVal);
+    }
+    //TODO: add usefull build-in functions
+    #region built-in funcs
+    public static RTResult execute_print(ContextHolder execCtx)
+    {
+        Console.WriteLine(execCtx.symbolTable.get("value"));
+        return new RTResult().success(new SpecialValue(SpecialValue.SpecialType.NullVal));
+    }
+
+    #endregion
+    private void NoVisitMethod(string name)
+    {
+        throw new Exception($"No {name} method defined");
+    }
+    public override ValueF Copy()
+    {
+        BuiltInFun copy = new BuiltInFun(Name);
+        copy.SetPos(PosStart, PosEnd);
+        copy.setContext(Context);
+        return copy;
+    }
+    public override string ToString() => $"<built-in function {Name}>";
 
 }
 #endregion
@@ -1879,7 +1987,7 @@ static class Interpreter
            return res.failure(new RTError(node.PosStart, node.PosEnd, $"{varName} is not defined", context));
         }
 
-        value = value.Copy().SetPos(node.PosStart, node.PosEnd);
+        value = value.Copy().SetPos(node.PosStart, node.PosEnd).setContext(context);
 
         return res.success(value);
     }
@@ -2087,6 +2195,8 @@ static class Interpreter
 
         ValueF returnValue = res.register(valueToCall.Execute(args));
         if (res.HasError) return res;
+
+        returnValue = returnValue.Copy().SetPos(node.PosStart, node.PosEnd).setContext(context);//TODO: Test what removing this method does
 
         return res.success(returnValue);
     }
