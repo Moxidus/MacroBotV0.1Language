@@ -13,6 +13,7 @@ Some errors override old errors even tho they are correct
 fun parameters should have its own parent
 using VAR keyword everytime to create variable is dumb
 you can create global variable when adding it to arguments of FOR cycle
+for some reason its legal to create unary expresion with array
 ITS OK ITS NOT A BUG BUT A FEATURE!
  */
 
@@ -50,6 +51,7 @@ public static class MainScript
     public const string TT_GTE = "TT_GTE";
     public const string TT_COMMA = "TT_COMMA";
     public const string TT_ARROW = "TT_ARROW";
+    public const string TT_NEWLINE = "TT_NEWLINE";
     public const string TT_EOF = "TT_EOF";
     #endregion
 
@@ -67,6 +69,7 @@ public static class MainScript
         "TO",
         "STEP",
         "FUN",
+        "END",
         "WHILE"
     };
 
@@ -80,6 +83,7 @@ public static class MainScript
         GlobalSymbolTable.Set("FALSE", new SpecialValue(SpecialValue.SpecialType.FalseVal));
         //setting built-in FUNCTIONS
         GlobalSymbolTable.Set("PRINT", new BuiltInFun("print"));
+        GlobalSymbolTable.Set("TO_STRING", new BuiltInFun("toString"));
 
         EscapeChars = new Dictionary<char, char>();
         EscapeChars.Add('n','\n');
@@ -239,6 +243,11 @@ public class Lexer
             else if (current_char == ',')
             {
                 tokens.Add(new Token(MainScript.TT_COMMA, posStart: this.pos));
+                advance();
+            }
+            else if (";\n".Contains((char)current_char))
+            {
+                tokens.Add(new Token(MainScript.TT_NEWLINE, posStart: this.pos));
                 advance();
             }
             else if (MainScript.DIGITS.Contains((char)current_char))
@@ -621,24 +630,39 @@ public class ListNode:Node
 
 class ParseResult
 {
+    public int ReverseCount = 0;
+    public int lastRegAdvanceCount = 0;
+    public int advanceCount = 0;
+
     public CustomError error;
     public Node node;
-    public int advanceCount = 0;
     public bool HasError;
 
 
     public void registerAdvancement()
     {
+        lastRegAdvanceCount = 0;
         advanceCount++;
     }
 
     public Node register(ParseResult res) {
+        lastRegAdvanceCount = res.advanceCount;
         advanceCount += res.advanceCount;
         if (res.HasError) { 
             this.error = res.error;
             this.HasError = true;
         }
         return res.node;
+    }
+
+    public Node tryRegister(ParseResult res)
+    {
+        if (res.HasError)
+        {
+            ReverseCount = res.advanceCount;
+            return null;
+        }
+        return res.register(res);
     }
 
 
@@ -667,32 +691,200 @@ class Parser
         tok_idx = -1;
         advance();
     }
-
     Token advance()
     {
         tok_idx++;
-        if (tok_idx < tokens.Count)
-        {
-            current_tok = tokens[tok_idx];
-        }
+        updateCurrentTok();
         return current_tok;
+    }
+
+    Token reverse(int reverseCount = 1)
+    {
+        tok_idx -= reverseCount;
+        updateCurrentTok();
+        return current_tok;
+    }
+
+    private void updateCurrentTok()
+    {
+        if (tok_idx >= 0 && tok_idx < tokens.Count)
+            current_tok = tokens[tok_idx];
     }
 
     //#################################################################
     public ParseResult parse()
     {
-        ParseResult res = expr();
+        ParseResult res = statements();
         if (!res.HasError && this.current_tok.type != MainScript.TT_EOF)
         {
             return res.failure(new InvalidSyntaxError(
                 this.current_tok.posStart,
                 this.current_tok.posEnd,
-                "Expected '+', '-', '*' or '/'"));
+                "Expected '+', '-', '*', '/', '^', '==', '!=', '<', '>', '<=', '>=', 'AND' or 'OR'"));
         }
         return res;
     }
-    ParseResult Power() => binOp(Call, new (string, string)[] { (MainScript.TT_POW, null) }, factor);
-    ParseResult Call() {
+
+
+    #region Language grammar methods  
+    private ParseResult statements()
+    {
+        // Holds result
+        ParseResult res = new ParseResult();
+
+        List<Node> statementsTemp = new List<Node>();
+        Position posStart = current_tok.posStart.copy();
+
+        while(current_tok.type == MainScript.TT_NEWLINE)
+        {
+            res.registerAdvancement();
+            advance();
+        }
+
+        Node statementTemp = res.register(expr());
+        if (res.HasError) return res;
+
+        statementsTemp.Add(statementTemp);
+
+        bool moreStatements = true;
+
+        while (true)
+        {
+            int newLineCount = 0;
+            while (current_tok.type == MainScript.TT_NEWLINE)
+            {
+                res.registerAdvancement();
+                advance();
+                newLineCount++;
+            }
+            if (newLineCount == 0)
+                moreStatements = false;
+
+            if (!moreStatements)
+                break;
+
+            statementTemp = res.tryRegister(expr());
+            if (statementTemp == null)
+            {
+                reverse(res.ReverseCount);
+                moreStatements = false;
+                continue;
+            }
+            statementsTemp.Add(statementTemp);
+        }
+
+        return res.success(new ListNode(
+            statementsTemp,
+            posStart,
+            current_tok.posEnd.copy()));
+
+    }
+    private ParseResult expr()
+    {
+        // Holds result
+        ParseResult res = new ParseResult();
+
+        // finds keyword values like VAR
+        if (current_tok.Matches(MainScript.TT_KEYWORD, "VAR"))
+        {
+            res.registerAdvancement();
+            advance();
+
+            // If token next to KEYWORD is not identifier throw an error
+            if (current_tok.type != MainScript.TT_IDENTIFIER)
+                return res.failure(
+                    new InvalidSyntaxError(
+                        current_tok.posStart,
+                        current_tok.posEnd,
+                        "Expected Identifier"));
+
+            Token varName = current_tok;
+            res.registerAdvancement();
+            advance();
+
+            // If token next to IDENTIFIER is not "=" throw an error
+            if (current_tok.type != MainScript.TT_EQ)
+                return res.failure(
+                    new InvalidSyntaxError(
+                        current_tok.posStart,
+                        current_tok.posEnd,
+                        "Expected \"=\""));
+
+            res.registerAdvancement();
+            advance();
+
+            // Registers the expresion right next to the "="
+            Node exTemp = res.register(this.expr());
+            if (res.HasError)// ERROR check
+                return res;
+
+            return res.success(new VarAssignNode(varName, exTemp));
+        }
+
+        Node node = res.register(binOp(compExpr, new (string, string)[] { (MainScript.TT_KEYWORD, "AND"), (MainScript.TT_KEYWORD, "OR") }));
+        if (res.HasError)
+            return res.failure(new InvalidSyntaxError(
+                current_tok.posStart, current_tok.posEnd,
+                "Expected 'VAR', int, float, identifier, '+', '-', '[' or '('"));
+
+        return res.success(node);
+    }
+    private ParseResult compExpr()
+    {
+        ParseResult res = new ParseResult();
+
+        if(current_tok.Matches(MainScript.TT_KEYWORD, "NOT"))
+        {
+            Token opTok = current_tok;
+            res.registerAdvancement();
+            advance();
+
+            Node nodeNot = res.register(compExpr());
+            if (res.HasError)
+                return res;
+            return res.success(new UnaryOpNode(opTok, nodeNot));
+        }
+
+        Node node = res.register(binOp(arithExpr, new (string, string)[] {(MainScript.TT_EE, null), (MainScript.TT_NE, null), (MainScript.TT_LT, null), (MainScript.TT_GT, null), (MainScript.TT_GTE, null), (MainScript.TT_LTE, null) }));
+        if (res.HasError) return res;
+
+        //this causes problesm
+        /*if (res.HasError)
+            return res.failure(
+                new InvalidSyntaxError(
+                    node.PosStart,
+                    node.PosEnd,
+                    "Expected int, float, identifier, '+', '-', '(', '[' or ''"));*/
+
+        return res.success(node);
+
+    }
+    private ParseResult arithExpr()
+    {
+        return binOp(term, new (string, string)[] { (MainScript.TT_PLUS, null), (MainScript.TT_MINUS, null) });
+    }
+    private ParseResult term() => binOp(factor, new (string, string)[] { (MainScript.TT_MUL, null), (MainScript.TT_DIV, null) });
+    private ParseResult factor()
+    {
+        ParseResult res = new ParseResult();
+        Token tok = current_tok;
+
+        if (tok.type == MainScript.TT_MINUS || tok.type == MainScript.TT_PLUS)
+        {
+            res.registerAdvancement();
+            advance();
+            Node factorTemp = res.register(factor());
+            if (res.HasError)
+                return res;
+            return res.success(new UnaryOpNode(tok, factorTemp));
+
+        }
+
+        return Power();
+    }
+    private ParseResult Power() => binOp(Call, new (string, string)[] { (MainScript.TT_POW, null) }, factor);
+    private ParseResult Call()
+    {
         ParseResult res = new ParseResult();
 
         List<Node> argsNodes = new List<Node>();
@@ -701,12 +893,12 @@ class Parser
         if (res.HasError)
             return res;
 
-        if(current_tok.type == MainScript.TT_LPAREN)
+        if (current_tok.type == MainScript.TT_LPAREN)
         {
             res.registerAdvancement();// Steps over LPAREN
             advance();
 
-            if(current_tok.type == MainScript.TT_RPAREN)
+            if (current_tok.type == MainScript.TT_RPAREN)
             {
                 res.registerAdvancement();// Steps over RPAREN
                 advance();
@@ -720,7 +912,7 @@ class Parser
                         "Expected 'VAR', int, float, identifier, '+', '-', ')', '[' or '('"));
             }
 
-            while(current_tok.type == MainScript.TT_COMMA)
+            while (current_tok.type == MainScript.TT_COMMA)
             {
                 res.registerAdvancement();// Steps over COMMA
                 advance();
@@ -742,7 +934,8 @@ class Parser
         return res.success(atomTemp);
 
     }
-    ParseResult atom(){
+    private ParseResult atom()
+    {
         ParseResult res = new ParseResult();
         Token tok = current_tok;
 
@@ -826,7 +1019,6 @@ class Parser
                 tok.posEnd,
                 "Expected int, float, identifier, \"[\", \"+\", \"-\" or \"(\""));
     }
-
     private ParseResult listExpr()
     {
         ParseResult res = new ParseResult();
@@ -872,87 +1064,78 @@ class Parser
         return res.success(new ListNode(elementNode, posStart, current_tok.posStart.copy()));
 
     }
-
-    private ParseResult Fundef()
+    private ParseResult ifExpr()
     {
         ParseResult res = new ParseResult();
+        List<(Node, Node)> cases = new List<(Node, Node)>();
+        Node elseCase = null;
 
-        List<Token> argNameTokens = new List<Token>();
-        Node bodyNode;
-        Token varNameTok = null;
-
-        res.registerAdvancement(); // Steps over FUN
+        //Position posStart = current_tok.posStart.copy();
+        res.registerAdvancement();
         advance();
 
-        string errorMsg = "Expected '('";
-        if (current_tok.type == MainScript.TT_IDENTIFIER)
-        {
-            varNameTok = current_tok;
-            res.registerAdvancement(); // Steps over IDENTIFIER
-            advance();
-        } else
-            errorMsg += " or identifier";
-        if (current_tok.type != MainScript.TT_LPAREN)
-            return res.failure(new InvalidSyntaxError(current_tok.posStart, current_tok.posEnd, errorMsg));
-
-        res.registerAdvancement(); // Steps over LPAREN
-        advance();
-
-        if(current_tok.type == MainScript.TT_IDENTIFIER)
-        {
-            argNameTokens.Add(current_tok);
-            res.registerAdvancement(); // Steps over IDENTIFIER
-            advance();
-
-            while (current_tok.type == MainScript.TT_COMMA)
-            {
-                res.registerAdvancement(); // Steps over COMMA
-                advance();
-
-                if (current_tok.type != MainScript.TT_IDENTIFIER)
-                    return res.failure(new InvalidSyntaxError(
-                        current_tok.posStart,
-                        current_tok.posEnd,
-                        "Expected Identifier"));
-
-                argNameTokens.Add(current_tok);
-                res.registerAdvancement(); // Steps over IDENTIFIER
-                advance();
-            }
-
-            if (current_tok.type != MainScript.TT_RPAREN)
-                return res.failure(new InvalidSyntaxError(
-                    current_tok.posStart,
-                    current_tok.posEnd,
-                    "Expected ')' or ','"));
-        } else
-        {
-            if (current_tok.type != MainScript.TT_RPAREN)
-                return res.failure(new InvalidSyntaxError(
-                    current_tok.posStart,
-                    current_tok.posEnd,
-                    "Expected 'identifier' or ')'"));
-        }
-
-        res.registerAdvancement(); // Steps over RPARAN
-        advance();
-
-        if (current_tok.type != MainScript.TT_ARROW)
-            return res.failure(new InvalidSyntaxError(
-                current_tok.posStart,
-                current_tok.posEnd,
-                "Expected '->'"));
-
-        res.registerAdvancement(); // Steps over ARROW
-        advance();
-
-        bodyNode = res.register(expr());
-        if (res.HasError)
+        // Registers the expresion right next to the "IF"
+        Node condition = res.register(this.expr());
+        if (res.HasError)// ERROR check
             return res;
 
-        return res.success(new FunDefNode(argNameTokens, bodyNode, varNameTok));
-    }
+        // If token next to expresion is not "THEN" throw an error
+        if (!current_tok.Matches(MainScript.TT_KEYWORD, "THEN"))
+            return res.failure(
+                new InvalidSyntaxError(
+                    current_tok.posStart,
+                    current_tok.posEnd,
+                    "Expected \"THEN\""));
 
+        res.registerAdvancement();
+        advance();
+
+        // Registers the expresion right next to the "THEN"
+        Node exprTemp = res.register(this.expr());
+        if (res.HasError)// ERROR check
+            return res;
+        cases.Add((condition, exprTemp));
+
+        while (current_tok.Matches(MainScript.TT_KEYWORD, "ELIF"))
+        {
+            res.registerAdvancement();
+            advance();
+
+            condition = res.register(expr());
+            if (res.HasError)// ERROR check
+                return res;
+
+            if (!current_tok.Matches(MainScript.TT_KEYWORD, "THEN"))
+                return res.failure(
+                    new InvalidSyntaxError(
+                        current_tok.posStart,
+                        current_tok.posEnd,
+                        "Expected \"THEN\""));
+
+            res.registerAdvancement();
+            advance();
+
+            exprTemp = res.register(expr());
+            if (res.HasError)// ERROR check
+                return res;
+
+            cases.Add((condition, exprTemp));
+        }
+
+        if (current_tok.Matches(MainScript.TT_KEYWORD, "ELSE"))
+        {
+
+            res.registerAdvancement();
+            advance();
+
+            exprTemp = res.register(expr());
+            if (res.HasError)// ERROR check
+                return res;
+            elseCase = exprTemp;
+        }
+
+        return res.success(new VarIfThenNode(cases, elseCase));
+    }
     private ParseResult whileExpr()
     {
         ParseResult res = new ParseResult();
@@ -991,7 +1174,6 @@ class Parser
         return res.success(new WhileNode(condition, body));
 
     }
-
     private ParseResult forExpr()
     {
 
@@ -1073,188 +1255,88 @@ class Parser
 
         return res.success(new ForNode(varName, startVal, endVal, bodyNode, stepNode));
     }
-
-    private ParseResult ifExpr()
+    private ParseResult Fundef()
     {
         ParseResult res = new ParseResult();
-        List<(Node, Node)> cases = new List<(Node, Node)>();
-        Node elseCase = null;
 
-        //Position posStart = current_tok.posStart.copy();
-        res.registerAdvancement();
+        List<Token> argNameTokens = new List<Token>();
+        Node bodyNode;
+        Token varNameTok = null;
+
+        res.registerAdvancement(); // Steps over FUN
         advance();
 
-        // Registers the expresion right next to the "IF"
-        Node condition = res.register(this.expr());
-        if (res.HasError)// ERROR check
-            return res;
+        string errorMsg = "Expected '('";
+        if (current_tok.type == MainScript.TT_IDENTIFIER)
+        {
+            varNameTok = current_tok;
+            res.registerAdvancement(); // Steps over IDENTIFIER
+            advance();
+        }
+        else
+            errorMsg += " or identifier";
+        if (current_tok.type != MainScript.TT_LPAREN)
+            return res.failure(new InvalidSyntaxError(current_tok.posStart, current_tok.posEnd, errorMsg));
 
-        // If token next to expresion is not "THEN" throw an error
-        if (!current_tok.Matches(MainScript.TT_KEYWORD, "THEN"))
-            return res.failure(
-                new InvalidSyntaxError(
-                    current_tok.posStart,
-                    current_tok.posEnd,
-                    "Expected \"THEN\""));
-
-        res.registerAdvancement();
+        res.registerAdvancement(); // Steps over LPAREN
         advance();
 
-        // Registers the expresion right next to the "THEN"
-        Node exprTemp = res.register(this.expr());
-        if (res.HasError)// ERROR check
-            return res;
-        cases.Add((condition, exprTemp));
-
-        while(current_tok.Matches(MainScript.TT_KEYWORD, "ELIF"))
+        if (current_tok.type == MainScript.TT_IDENTIFIER)
         {
-            res.registerAdvancement();
+            argNameTokens.Add(current_tok);
+            res.registerAdvancement(); // Steps over IDENTIFIER
             advance();
 
-            condition = res.register(expr());
-            if (res.HasError)// ERROR check
-                return res;
+            while (current_tok.type == MainScript.TT_COMMA)
+            {
+                res.registerAdvancement(); // Steps over COMMA
+                advance();
 
-            if (!current_tok.Matches(MainScript.TT_KEYWORD, "THEN"))
-                return res.failure(
-                    new InvalidSyntaxError(
-                        current_tok.posStart,
-                        current_tok.posEnd,
-                        "Expected \"THEN\""));
-
-            res.registerAdvancement();
-            advance();
-
-            exprTemp = res.register(expr());
-            if (res.HasError)// ERROR check
-                return res;
-
-            cases.Add((condition, exprTemp));
-        }
-
-        if(current_tok.Matches(MainScript.TT_KEYWORD, "ELSE"))
-        {
-
-            res.registerAdvancement();
-            advance();
-
-            exprTemp = res.register(expr());
-            if (res.HasError)// ERROR check
-                return res;
-            elseCase = exprTemp;
-        }
-
-        return res.success(new VarIfThenNode(cases, elseCase));
-    }
-
-    ParseResult factor()
-    {
-        ParseResult res = new ParseResult();
-        Token tok = current_tok;
-
-        if( tok.type == MainScript.TT_MINUS || tok.type == MainScript.TT_PLUS)
-        {
-            res.registerAdvancement();
-            advance();
-            Node factorTemp = res.register(factor());
-            if (res.HasError)
-                return res;
-            return res.success(new UnaryOpNode(tok, factorTemp));
-
-        }
-
-        return Power();
-    }
-
-
-    ParseResult term() => binOp(factor, new (string, string)[] { (MainScript.TT_MUL, null), (MainScript.TT_DIV, null) });
-
-    ParseResult expr()
-    {
-        // Holds result
-        ParseResult res = new ParseResult();
-
-        // finds keyword values like VAR
-        if (current_tok.Matches(MainScript.TT_KEYWORD, "VAR"))
-        {
-            res.registerAdvancement();
-            advance();
-
-            // If token next to KEYWORD is not identifier throw an error
-            if (current_tok.type != MainScript.TT_IDENTIFIER)
-                return res.failure(
-                    new InvalidSyntaxError(
+                if (current_tok.type != MainScript.TT_IDENTIFIER)
+                    return res.failure(new InvalidSyntaxError(
                         current_tok.posStart,
                         current_tok.posEnd,
                         "Expected Identifier"));
 
-            Token varName = current_tok;
-            res.registerAdvancement();
-            advance();
+                argNameTokens.Add(current_tok);
+                res.registerAdvancement(); // Steps over IDENTIFIER
+                advance();
+            }
 
-            // If token next to IDENTIFIER is not "=" throw an error
-            if (current_tok.type != MainScript.TT_EQ)
-                return res.failure(
-                    new InvalidSyntaxError(
-                        current_tok.posStart,
-                        current_tok.posEnd,
-                        "Expected \"=\""));
-
-            res.registerAdvancement();
-            advance();
-
-            // Registers the expresion right next to the "="
-            Node exTemp = res.register(this.expr());
-            if (res.HasError)// ERROR check
-                return res;
-
-            return res.success(new VarAssignNode(varName, exTemp));
+            if (current_tok.type != MainScript.TT_RPAREN)
+                return res.failure(new InvalidSyntaxError(
+                    current_tok.posStart,
+                    current_tok.posEnd,
+                    "Expected ')' or ','"));
         }
-
-        Node node = res.register(binOp(compExpr, new (string, string)[] { (MainScript.TT_KEYWORD, "AND"), (MainScript.TT_KEYWORD, "OR") }));
-        if (res.HasError)
-            return res.failure(new InvalidSyntaxError(
-                current_tok.posStart, current_tok.posEnd,
-                "Expected 'VAR', int, float, identifier, '+', '-', '[' or '('"));
-
-        return res.success(node);
-    }
-
-    private ParseResult compExpr()
-    {
-        ParseResult res = new ParseResult();
-
-        if(current_tok.Matches(MainScript.TT_KEYWORD, "NOT"))
+        else
         {
-            Token opTok = current_tok;
-            res.registerAdvancement();
-            advance();
-
-            Node nodeNot = res.register(compExpr());
-            if (res.HasError)
-                return res;
-            return res.success(new UnaryOpNode(opTok, nodeNot));
+            if (current_tok.type != MainScript.TT_RPAREN)
+                return res.failure(new InvalidSyntaxError(
+                    current_tok.posStart,
+                    current_tok.posEnd,
+                    "Expected 'identifier' or ')'"));
         }
 
-        Node node = res.register(binOp(arithExpr, new (string, string)[] {(MainScript.TT_EE, null), (MainScript.TT_NE, null), (MainScript.TT_LT, null), (MainScript.TT_GT, null), (MainScript.TT_GTE, null), (MainScript.TT_LTE, null) }));
-        if (res.HasError) return res;
+        res.registerAdvancement(); // Steps over RPARAN
+        advance();
 
-        //this causes problesm
-        /*if (res.HasError)
-            return res.failure(
-                new InvalidSyntaxError(
-                    node.PosStart,
-                    node.PosEnd,
-                    "Expected int, float, identifier, '+', '-', '(', '[' or ''"));*/
+        if (current_tok.type != MainScript.TT_ARROW)
+            return res.failure(new InvalidSyntaxError(
+                current_tok.posStart,
+                current_tok.posEnd,
+                "Expected '->'"));
 
-        return res.success(node);
+        res.registerAdvancement(); // Steps over ARROW
+        advance();
 
+        bodyNode = res.register(expr());
+        if (res.HasError)
+            return res;
+
+        return res.success(new FunDefNode(argNameTokens, bodyNode, varNameTok));
     }
-
-    private ParseResult arithExpr()
-    {
-        return binOp(term, new (string, string)[] { (MainScript.TT_PLUS, null), (MainScript.TT_MINUS, null) });
-    }
+    #endregion
 
     ParseResult binOp(Func<ParseResult> funcA, (string, string)[] ops, Func<ParseResult> funcB = null)
     {
@@ -1840,6 +1922,7 @@ public class BuiltInFun : BaseFunction
     {
         //Dictionary of arguments
         argNamesDictionary.Add("print", new List<string>(new string[] { "value"}));
+        argNamesDictionary.Add("toString", new List<string>(new string[] { "convertable" }));
 
     }
 
@@ -1878,6 +1961,7 @@ public class BuiltInFun : BaseFunction
         return new RTResult().success(new SpecialValue(SpecialValue.SpecialType.NullVal));
     }
 
+    public static RTResult execute_toString(ContextHolder execCtx) => new RTResult().success(new StringValue(execCtx.symbolTable.get("convertable").ToString()));
     #endregion
     private void NoVisitMethod(string name)
     {
@@ -2143,7 +2227,7 @@ static class Interpreter
             res.register(Visit(node.BodyVal, context));
             if (res.HasError) return res;
         }
-        return res.success(null);
+        return res.success(new SpecialValue(SpecialValue.SpecialType.NullVal));
 
     }
     public static RTResult Visit_WhileNode(WhileNode node, ContextHolder context)
@@ -2152,7 +2236,7 @@ static class Interpreter
 
         while (true)
         {
-            Number condition = (Number)res.register(Visit(node.Condition, context));
+            ValueF condition = res.register(Visit(node.Condition, context));
             if (res.HasError) return res;
 
             if (!condition.isTrue())
@@ -2161,7 +2245,7 @@ static class Interpreter
             res.register(Visit(node.BodyVal, context));
             if (res.HasError) return res;
         }
-        return res.success(null);
+        return res.success(new SpecialValue(SpecialValue.SpecialType.NullVal));
     }
     public static RTResult Visit_FunDefNode(FunDefNode node, ContextHolder context)
     {

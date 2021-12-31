@@ -17,6 +17,7 @@ namespace MacroBotV0._1Language
             {
                 Console.Write("MacroScript > "); 
                 string txt = Console.ReadLine();
+                if (txt.Trim() == "") continue;
                 // Console.WriteLine(txt);
 
                 (ValueF, CustomError) tokensAndError = MainScript.Run("<TestFileName>" ,txt);
