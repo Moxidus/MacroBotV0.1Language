@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.Reflection;
 using System.Linq;
+using System.Threading;
 
 
 //List of broken things:
@@ -81,9 +82,82 @@ public static class MainScript
         GlobalSymbolTable.Set("NULL", new SpecialValue(SpecialValue.SpecialType.NullVal));
         GlobalSymbolTable.Set("TRUE", new SpecialValue(SpecialValue.SpecialType.TrueVal));
         GlobalSymbolTable.Set("FALSE", new SpecialValue(SpecialValue.SpecialType.FalseVal));
-        //setting built-in FUNCTIONS
+        GlobalSymbolTable.Set("PI", new Number(MathF.PI));
+
+        #region built-in FUNCTIONS
         GlobalSymbolTable.Set("PRINT", new BuiltInFun("print"));
         GlobalSymbolTable.Set("TO_STRING", new BuiltInFun("toString"));
+        GlobalSymbolTable.Set("DELAY", new BuiltInFun("delay"));
+        GlobalSymbolTable.Set("MOVE", new BuiltInFun("moveMouse"));
+        GlobalSymbolTable.Set("SIN", new BuiltInFun("sin"));
+        GlobalSymbolTable.Set("PRESS", new BuiltInFun("press"));
+        #endregion
+
+        #region KeyCodes
+        GlobalSymbolTable.Set("VK_0", new Number(0x30));
+        GlobalSymbolTable.Set("VK_1", new Number(0x31));
+        GlobalSymbolTable.Set("VK_2", new Number(0x32));
+        GlobalSymbolTable.Set("VK_3", new Number(0x33));
+        GlobalSymbolTable.Set("VK_4", new Number(0x34));
+        GlobalSymbolTable.Set("VK_5", new Number(0x35));
+        GlobalSymbolTable.Set("VK_6", new Number(0x36));
+        GlobalSymbolTable.Set("VK_7", new Number(0x37));
+        GlobalSymbolTable.Set("VK_8", new Number(0x38));
+        GlobalSymbolTable.Set("VK_9", new Number(0x39));
+        GlobalSymbolTable.Set("VK_A", new Number(0x41));
+        GlobalSymbolTable.Set("VK_B", new Number(0x42));
+        GlobalSymbolTable.Set("VK_C", new Number(0x43));
+        GlobalSymbolTable.Set("VK_D", new Number(0x44));
+        GlobalSymbolTable.Set("VK_E", new Number(0x45));
+        GlobalSymbolTable.Set("VK_F", new Number(0x46));
+        GlobalSymbolTable.Set("VK_G", new Number(0x47));
+        GlobalSymbolTable.Set("VK_H", new Number(0x48));
+        GlobalSymbolTable.Set("VK_I", new Number(0x49));
+        GlobalSymbolTable.Set("VK_J", new Number(0x4A));
+        GlobalSymbolTable.Set("VK_K", new Number(0x4B));
+        GlobalSymbolTable.Set("VK_L", new Number(0x4C));
+        GlobalSymbolTable.Set("VK_M", new Number(0x4D));
+        GlobalSymbolTable.Set("VK_N", new Number(0x4E));
+        GlobalSymbolTable.Set("VK_O", new Number(0x4F));
+        GlobalSymbolTable.Set("VK_P", new Number(0x50));
+        GlobalSymbolTable.Set("VK_Q", new Number(0x51));
+        GlobalSymbolTable.Set("VK_R", new Number(0x52));
+        GlobalSymbolTable.Set("VK_S", new Number(0x53));
+        GlobalSymbolTable.Set("VK_T", new Number(0x54));
+        GlobalSymbolTable.Set("VK_U", new Number(0x55));
+        GlobalSymbolTable.Set("VK_V", new Number(0x56));
+        GlobalSymbolTable.Set("VK_W", new Number(0x57));
+        GlobalSymbolTable.Set("VK_X", new Number(0x58));
+        GlobalSymbolTable.Set("VK_Y", new Number(0x59));
+        GlobalSymbolTable.Set("VK_Z", new Number(0x5A));
+        GlobalSymbolTable.Set("VK_NUMPAD0", new Number(0x60));
+        GlobalSymbolTable.Set("VK_NUMPAD1", new Number(0x61));
+        GlobalSymbolTable.Set("VK_NUMPAD2", new Number(0x62));
+        GlobalSymbolTable.Set("VK_NUMPAD3", new Number(0x63));
+        GlobalSymbolTable.Set("VK_NUMPAD4", new Number(0x64));
+        GlobalSymbolTable.Set("VK_NUMPAD5", new Number(0x65));
+        GlobalSymbolTable.Set("VK_NUMPAD6", new Number(0x66));
+        GlobalSymbolTable.Set("VK_NUMPAD7", new Number(0x67));
+        GlobalSymbolTable.Set("VK_NUMPAD8", new Number(0x68));
+        GlobalSymbolTable.Set("VK_NUMPAD9", new Number(0x69));
+        GlobalSymbolTable.Set("VK_MULTIPLY", new Number(0x6A));
+        GlobalSymbolTable.Set("VK_ADD", new Number(0x6B));
+        GlobalSymbolTable.Set("VK_SUBTRACT", new Number(0x6D));
+        GlobalSymbolTable.Set("VK_DECIMAL", new Number(0x6E));
+        GlobalSymbolTable.Set("VK_DIVIDE", new Number(0x6F));
+        GlobalSymbolTable.Set("VK_F1", new Number(0x70));
+        GlobalSymbolTable.Set("VK_F2", new Number(0x71));
+        GlobalSymbolTable.Set("VK_F3", new Number(0x72));
+        GlobalSymbolTable.Set("VK_F4", new Number(0x73));
+        GlobalSymbolTable.Set("VK_F5", new Number(0x74));
+        GlobalSymbolTable.Set("VK_F6", new Number(0x75));
+        GlobalSymbolTable.Set("VK_F7", new Number(0x76));
+        GlobalSymbolTable.Set("VK_F8", new Number(0x77));
+        GlobalSymbolTable.Set("VK_F9", new Number(0x78));
+        GlobalSymbolTable.Set("VK_F10", new Number(0x79));
+        GlobalSymbolTable.Set("VK_F11", new Number(0x7A));
+        GlobalSymbolTable.Set("VK_F12", new Number(0x7B));
+        #endregion
 
         EscapeChars = new Dictionary<char, char>();
         EscapeChars.Add('n','\n');
@@ -1348,6 +1422,11 @@ class Parser
                 "Expected 'THEN'"));
 
 
+        res.registerAdvancement();
+        advance();
+
+
+
         if (current_tok.type == MainScript.TT_NEWLINE)
         {
             res.registerAdvancement();
@@ -2171,6 +2250,10 @@ public class BuiltInFun : BaseFunction
         //Dictionary of arguments
         argNamesDictionary.Add("print", new List<string>(new string[] { "value"}));
         argNamesDictionary.Add("toString", new List<string>(new string[] { "convertable" }));
+        argNamesDictionary.Add("delay", new List<string>(new string[] { "time" }));
+        argNamesDictionary.Add("moveMouse", new List<string>(new string[] { "x", "y" }));
+        argNamesDictionary.Add("sin", new List<string>(new string[] { "value"}));
+        argNamesDictionary.Add("press", new List<string>(new string[] { "keyCode"}));
 
     }
 
@@ -2203,9 +2286,75 @@ public class BuiltInFun : BaseFunction
     }
     //TODO: add usefull build-in functions
     #region built-in funcs
+
+    public static RTResult execute_press(ContextHolder execCtx)
+    {
+        ValueF parameter = execCtx.symbolTable.get("keyCode");
+
+        if (parameter is Number == false)//Checks if keyCode is number
+            return new RTResult().failure(
+                new RTError(parameter.PosStart, parameter.PosEnd,
+                    "Epected Int", execCtx));
+
+        int keyCode = (int)((Number)parameter).Value;
+
+        Win32.PressKey(keyCode);
+
+        return new RTResult().success(new SpecialValue(SpecialValue.SpecialType.NullVal));
+    }
+    public static RTResult execute_sin(ContextHolder execCtx)
+    {
+        ValueF parameter = execCtx.symbolTable.get("value");
+
+        if (parameter is Number == false)//Checks if x is number
+            return new RTResult().failure(
+                new RTError(parameter.PosStart, parameter.PosEnd,
+                    "Epected Float or Int", execCtx));
+
+        float floatVal = (float)((Number)parameter).Value;
+        float sinOfVal = MathF.Sin(floatVal);
+        return new RTResult().success(new Number(sinOfVal).setContext(execCtx));
+    }
+    public static RTResult execute_moveMouse(ContextHolder execCtx)
+    {
+        ValueF xPosVal = execCtx.symbolTable.get("x");
+        ValueF yPosVal = execCtx.symbolTable.get("y");
+
+        if(xPosVal is Number == false)//Checks if x is number
+            return new RTResult().failure(
+                new RTError(xPosVal.PosStart, xPosVal.PosEnd,
+                    "Epected Float or Int", execCtx));
+
+        if (yPosVal is Number == false)//Checks if y is number
+            return new RTResult().failure(
+                new RTError(yPosVal.PosStart, yPosVal.PosEnd,
+                    "Epected Float or Int", execCtx));
+
+        int xPos = (int)((Number)xPosVal).Value;
+        int yPos = (int)((Number)yPosVal).Value;
+
+        Win32.POINT p = new Win32.POINT(xPos, yPos);
+        Win32.SetCursorPos(p.x, p.y);//moves Cursor to position
+
+        return new RTResult().success(new SpecialValue(SpecialValue.SpecialType.NullVal));
+
+    }
     public static RTResult execute_print(ContextHolder execCtx)
     {
         Console.WriteLine(execCtx.symbolTable.get("value"));
+        return new RTResult().success(new SpecialValue(SpecialValue.SpecialType.NullVal));
+    }
+
+    public static RTResult execute_delay(ContextHolder execCtx)
+    {
+        ValueF value = execCtx.symbolTable.get("time");//Gets required parameters
+
+        if (!(value is Number))
+            return new RTResult().failure(
+                new RTError(value.PosStart, value.PosEnd,
+                    "Epected Float or Int", execCtx));
+        int sleepTime = (int)((Number)value).Value;
+        Thread.Sleep(sleepTime);
         return new RTResult().success(new SpecialValue(SpecialValue.SpecialType.NullVal));
     }
 
@@ -2326,7 +2475,7 @@ static class Interpreter
         RTResult res = new RTResult();
         VarAssignNode varAssignNode = (VarAssignNode)node;
 
-        Console.WriteLine(varAssignNode.VarNameTok.ToString());
+        //Console.WriteLine(varAssignNode.VarNameTok.ToString());
 
         string varName = varAssignNode.VarNameTok.value.ToString();
         ValueF value = res.register(Visit(varAssignNode.ValueNode, context));
