@@ -523,18 +523,18 @@ public class VarAccessNode : Node//TODO: rest
 
     //public override string ToString() => $"({tok}, {node})";
 }
-public class VarIfThenNode : Node
+public class IfThenNode : Node
 {
-    public List<(Node, Node)> cases;
-    public Node elseCase;
+    public List<(Node, Node, bool)> cases;
+    public (Node, bool) elseCase;
 
-    public VarIfThenNode(List<(Node, Node)> cases, Node elseCase): base(null)
+    public IfThenNode(List<(Node, Node, bool)> cases, (Node, bool) elseCase): base(null)
     {
         this.cases = cases;
         this.elseCase = elseCase;
 
         PosStart = cases[0].Item1.PosStart;
-        PosEnd = elseCase != null ? elseCase.PosEnd : cases[cases.Count - 1].Item2.PosEnd;
+        PosEnd = elseCase.Item1 != null ? elseCase.Item1.PosEnd : cases[cases.Count - 1].Item2.PosEnd;
     }
 
     //public override string ToString() => $"({tok}, {node})";
@@ -545,12 +545,14 @@ public class ForNode : Node
     public Node EndValue;
     public Node BodyVal;
     public Node StepVal;
-    public ForNode(Token varName, Node startValue, Node endValue, Node bodyVal, Node stepVal) : base(varName)
+    public bool ShouldReturnNull;
+    public ForNode(Token varName, Node startValue, Node endValue, Node bodyVal, Node stepVal, bool shouldReturnNull) : base(varName)
     {
         this.StartValue = startValue;
         this.EndValue = endValue;
         this.BodyVal = bodyVal;
         this.StepVal = stepVal;
+        this.ShouldReturnNull = shouldReturnNull;
 
         this.PosStart = varName.posStart;
         this.PosEnd = BodyVal.PosEnd;
@@ -562,10 +564,13 @@ public class WhileNode : Node
 {
     public Node Condition;
     public Node BodyVal;
-    public WhileNode(Node condition, Node bodyVal) : base(null)
+    public bool ShouldReturnNull;
+
+    public WhileNode(Node condition, Node bodyVal, bool shouldReturnNull) : base(null)
     {
         this.Condition = condition;
         this.BodyVal = bodyVal;
+        this.ShouldReturnNull = shouldReturnNull;
 
         this.PosStart = condition.PosStart;
         this.PosEnd = BodyVal.PosEnd;
@@ -577,11 +582,13 @@ public class FunDefNode : Node
 {
     public List<Token> argNameToks;
     public Node bodyNode;
+    public bool ShouldReturnNull;
 
-    public FunDefNode(List<Token> argNameToks, Node bodyNode, Token varNameTok = null) :base(varNameTok)
+    public FunDefNode(List<Token> argNameToks, Node bodyNode, bool shouldReturnNull, Token varNameTok = null) :base(varNameTok)
     {
         this.argNameToks = argNameToks;
         this.bodyNode = bodyNode;
+        this.ShouldReturnNull = shouldReturnNull;
 
         if (varNameTok != null)
             PosStart = varNameTok.posStart;
@@ -638,6 +645,8 @@ class ParseResult
     public Node node;
     public bool HasError;
 
+    public (List<(Node, Node, bool)>, (Node, bool)) IfCases;//I hate this solution, this is not a solution this is crime!
+
 
     public void registerAdvancement()
     {
@@ -655,6 +664,19 @@ class ParseResult
         return res.node;
     }
 
+
+    public Node register(out (List<(Node, Node, bool)>, (Node, bool))  ifCases , ParseResult res) {
+        lastRegAdvanceCount = res.advanceCount;
+        advanceCount += res.advanceCount;
+        if (res.HasError) { 
+            this.error = res.error;
+            this.HasError = true;
+        }
+        ifCases = res.IfCases;
+        return res.node;
+    }
+
+
     public Node tryRegister(ParseResult res)
     {
         if (res.HasError)
@@ -670,6 +692,13 @@ class ParseResult
         this.node = node;
         return this;
     }
+
+    public ParseResult success((List<(Node, Node, bool)>, (Node, bool)) ifCases)
+    {
+        this.IfCases = ifCases;
+        return this;
+    }
+
     public ParseResult failure(CustomError error) {
         if(this.error == null || this.advanceCount == 0) 
             this.error = error;
@@ -677,6 +706,11 @@ class ParseResult
         return this;
     }
 
+    internal ParseResult success((Node, bool) elseCase)
+    {
+        this.IfCases.Item2 = elseCase;
+        return this;
+    }
 }
 
 class Parser
@@ -1067,6 +1101,14 @@ class Parser
     private ParseResult ifExpr()
     {
         ParseResult res = new ParseResult();
+
+        (List<(Node, Node, bool)>, (Node, bool)) allCases;
+        res.register( out allCases, ifExprCases("IF"));
+        if (res.HasError) return res;
+
+        return res.success(new IfThenNode(allCases.Item1, allCases.Item2));
+        
+        /*
         List<(Node, Node)> cases = new List<(Node, Node)>();
         Node elseCase = null;
 
@@ -1135,7 +1177,152 @@ class Parser
         }
 
         return res.success(new VarIfThenNode(cases, elseCase));
+        */
     }
+    private ParseResult ifExprEif() => ifExprCases("ELIF");
+
+    private ParseResult ifExprEifOrEl()
+    {
+        ParseResult res = new ParseResult();
+        List<(Node, Node, bool)> cases = new List<(Node, Node, bool)>();
+        (Node, bool) elseCase;
+
+        if(current_tok.Matches(MainScript.TT_KEYWORD, "ELIF"))
+        {
+
+            (List<(Node, Node, bool)>, (Node, bool)) allCases;
+            res.register(out allCases, ifExprEif());
+
+            if (res.HasError) return res;
+            cases = allCases.Item1;
+            elseCase = allCases.Item2;
+        }
+        else
+        {
+            (List<(Node, Node, bool)>, (Node, bool)) allCases;
+            res.register(out allCases, ifExprEl());
+            elseCase = allCases.Item2;
+            if (res.HasError) return res;
+        }
+
+        return res.success((cases, elseCase));
+    }
+
+    private ParseResult ifExprEl()
+    {
+        ParseResult res = new ParseResult();
+        (Node, bool) elseCase = (null, true);
+
+        if (current_tok.Matches(MainScript.TT_KEYWORD, "ELSE"))
+        {
+            res.registerAdvancement();// Steps over Else
+            advance();
+
+            if(current_tok.type == MainScript.TT_NEWLINE)
+            {
+                res.registerAdvancement();// Steps over NewLine
+                advance();
+
+                Node statementsTemp = res.register(statements());
+                if (res.HasError) return res;
+                elseCase = (statementsTemp, true);
+
+                if(current_tok.Matches(MainScript.TT_KEYWORD, "END"))
+                {
+                    res.registerAdvancement();// Steps over END keyWord
+                    advance();
+                }
+                else
+                {
+                    return res.failure(
+                        new InvalidSyntaxError(
+                            current_tok.posStart, current_tok.posEnd,
+                            "Expected 'END'"));
+                }
+            }
+            else
+            {
+                Node exprTemp = res.register(expr());
+                if (res.HasError) return res;
+                elseCase = (exprTemp, false);
+            }
+        }
+        return res.success(elseCase);
+    }
+
+    private ParseResult ifExprCases(string caseKeyword)
+    {
+        ParseResult res = new ParseResult();
+        List<(Node, Node, bool)> cases = new List<(Node, Node, bool)>();
+        (Node, bool) elseCase = (null, true);
+
+        if (!current_tok.Matches(MainScript.TT_KEYWORD, caseKeyword))
+            return res.failure(
+                new InvalidSyntaxError(
+                    current_tok.posStart, current_tok.posEnd,
+                    $"Expected '{caseKeyword}'"));
+
+        res.registerAdvancement();// Steps over caseWord like if, elif and else
+        advance();
+
+        Node condition = res.register(expr());
+        if (res.HasError) return res;
+
+        if (!current_tok.Matches(MainScript.TT_KEYWORD, "THEN"))
+            return res.failure(
+                new InvalidSyntaxError(
+                    current_tok.posStart, current_tok.posEnd,
+                    "Expected 'THEN'"));
+
+
+        res.registerAdvancement();// Steps over THEN
+        advance();
+
+        if( current_tok.type == MainScript.TT_NEWLINE)
+        {
+            res.registerAdvancement();// Steps over newLine
+            advance();
+
+            Node statementsTemp = res.register(statements());
+            if (res.HasError) return res;
+            cases.Add((condition, statementsTemp, true));
+
+            if(current_tok.Matches(MainScript.TT_KEYWORD, "END"))
+            {
+                res.registerAdvancement();
+                advance();
+            }
+            else
+            {
+                (List<(Node, Node, bool)>, (Node, bool)) allCases;
+                res.register(out allCases, ifExprEifOrEl());
+
+                if (res.HasError) return res;
+                List<(Node, Node, bool)>  newCases = allCases.Item1;
+                elseCase = allCases.Item2;
+                cases.AddRange(newCases);
+            }
+        }
+        else
+        {
+            Node exprtemp = res.register(expr());
+            if (res.HasError) return res;
+            cases.Add((condition, exprtemp, false));
+
+            (List<(Node, Node, bool)>, (Node, bool)) allCases;
+            res.register(out allCases, ifExprEifOrEl());
+
+            if (res.HasError) return res;
+            List<(Node, Node, bool)> newCases = allCases.Item1;
+            elseCase = allCases.Item2;
+            cases.AddRange(newCases);
+        }
+
+        return res.success((cases, elseCase));
+
+    }
+
+
     private ParseResult whileExpr()
     {
         ParseResult res = new ParseResult();
@@ -1161,6 +1348,27 @@ class Parser
                 "Expected 'THEN'"));
 
 
+        if (current_tok.type == MainScript.TT_NEWLINE)
+        {
+            res.registerAdvancement();
+            advance();
+
+            body = res.register(statements());
+            if (res.HasError) return res;
+
+            if (!current_tok.Matches(MainScript.TT_KEYWORD, "END"))
+                return res.failure(new InvalidSyntaxError(
+                    current_tok.posStart,
+                    current_tok.posEnd,
+                    "Expected 'END'"));
+
+            res.registerAdvancement();
+            advance();
+
+
+            return res.success(new WhileNode(condition, body, true));
+        }
+
         res.registerAdvancement(); // Steps over THEN
         advance();
 
@@ -1171,7 +1379,7 @@ class Parser
         if (res.HasError)// ERROR check
             return res;
 
-        return res.success(new WhileNode(condition, body));
+        return res.success(new WhileNode(condition, body, false));
 
     }
     private ParseResult forExpr()
@@ -1249,11 +1457,31 @@ class Parser
         res.registerAdvancement();// Steps over THEN
         advance();
 
-        bodyNode = res.register(expr());
-        if (res.HasError)// ERROR check
-            return res;
 
-        return res.success(new ForNode(varName, startVal, endVal, bodyNode, stepNode));
+        if(current_tok.type == MainScript.TT_NEWLINE)
+        {
+            res.registerAdvancement();
+            advance();
+
+            bodyNode = res.register(statements());
+            if (res.HasError) return res;
+
+            if(!current_tok.Matches(MainScript.TT_KEYWORD, "END"))
+                return res.failure(new InvalidSyntaxError(
+                    current_tok.posStart,
+                    current_tok.posEnd,
+                    "Expected 'END'"));
+
+            res.registerAdvancement();
+            advance();
+
+            return res.success(new ForNode(varName, startVal, endVal, bodyNode, stepNode, true));
+        }
+
+        bodyNode = res.register(expr());
+        if (res.HasError) return res;
+
+        return res.success(new ForNode(varName, startVal, endVal, bodyNode, stepNode, false));
     }
     private ParseResult Fundef()
     {
@@ -1322,19 +1550,39 @@ class Parser
         advance();
 
         if (current_tok.type != MainScript.TT_ARROW)
+        {
+            res.registerAdvancement(); // Steps over ARROW
+            advance();
+
+            bodyNode = res.register(expr());
+            if (res.HasError)
+                return res;
+
+            return res.success(new FunDefNode(argNameTokens, bodyNode, false, varNameTok));
+        }
+
+        if (current_tok.type != MainScript.TT_NEWLINE)
             return res.failure(new InvalidSyntaxError(
                 current_tok.posStart,
                 current_tok.posEnd,
-                "Expected '->'"));
+                "Expected '->' or NEWLINE"));
 
-        res.registerAdvancement(); // Steps over ARROW
+        res.registerAdvancement();
         advance();
 
-        bodyNode = res.register(expr());
-        if (res.HasError)
-            return res;
+        bodyNode = res.register(statements());
+        if (res.HasError) return res;
 
-        return res.success(new FunDefNode(argNameTokens, bodyNode, varNameTok));
+        if (!current_tok.Matches(MainScript.TT_KEYWORD, "END"))
+            return res.failure(new InvalidSyntaxError(
+                            current_tok.posStart, current_tok.posEnd,
+                            "Expected 'END'"));
+
+        res.registerAdvancement();
+        advance();
+
+
+        return res.success(new FunDefNode(argNameTokens, bodyNode, true, varNameTok));
     }
     #endregion
 
@@ -1401,7 +1649,6 @@ public class Position
     }
 
 }
-
 public class Token
 {
     public string type;
@@ -1436,7 +1683,6 @@ public class Token
         return (this.type == type && this.value.ToString() == value);
     }
 }
-
 #region Values
 public class ValueF
 {
@@ -1876,11 +2122,13 @@ public class Function : BaseFunction
 {
     Node BodyNode;
     List<string> ArgNames;
+    bool ShouldReturnNull;
 
-    public Function(Node bodyNode, List<string> argNames, string name):base(name)
+    public Function(Node bodyNode, List<string> argNames, string name, bool shouldReturnNull):base(name)
     {
         BodyNode = bodyNode;
         this.ArgNames = argNames;
+        this.ShouldReturnNull = shouldReturnNull;
     }
 
     public override RTResult Execute(List<ValueF> args)//POTENTIAL ERROR: not sure what type this arg is supossed to be
@@ -1894,12 +2142,12 @@ public class Function : BaseFunction
         ValueF value = res.register(Interpreter.Visit(BodyNode, execCtx));
         if (res.HasError) return res;
 
-        return res.success(value);
+        return res.success(ShouldReturnNull? new SpecialValue(SpecialValue.SpecialType.NullVal) : value);
     }
 
     public override ValueF Copy()
     {
-        ValueF copy = new Function(BodyNode, ArgNames, Name);
+        ValueF copy = new Function(BodyNode, ArgNames, Name, ShouldReturnNull);
 
         copy.setContext(Context);
 
@@ -1978,7 +2226,6 @@ public class BuiltInFun : BaseFunction
 
 }
 #endregion
-
 public class ContextHolder
 {
     public string displayName;
@@ -1993,7 +2240,6 @@ public class ContextHolder
         this.parentEtrPos = parentEtrPos;
     }
 }
-
 public class SymbolTable {
     Dictionary<string, ValueF> Symbols = new Dictionary<string, ValueF>();
     SymbolTable Parent;
@@ -2035,7 +2281,6 @@ public class SymbolTable {
 
     }
 }
-
 static class Interpreter
 {
     public static RTResult Visit(Node node, ContextHolder context) {
@@ -2167,11 +2412,11 @@ static class Interpreter
         if (res.HasError) return res.failure(result.Item2);
         return res.success(result.Item1.SetPos(node.PosStart, node.PosEnd));
     }
-    public static RTResult Visit_VarIfThenNode(VarIfThenNode node, ContextHolder context)
+    public static RTResult Visit_IfThenNode(IfThenNode node, ContextHolder context)
     {
         RTResult res = new RTResult();
 
-        foreach((Node, Node) conNExpr in node.cases)
+        foreach((Node, Node, bool) conNExpr in node.cases)
         {
             ValueF conditionValue = res.register(Visit(conNExpr.Item1, context));
             if (res.HasError) return res;
@@ -2180,17 +2425,17 @@ static class Interpreter
             {
                 ValueF exprVal = res.register(Visit(conNExpr.Item2, context));
                 if (res.HasError) return res;
-                return res.success(exprVal);
+                return res.success(conNExpr.Item3 ? new SpecialValue(SpecialValue.SpecialType.NullVal): exprVal);
 
             }
         }
-        if (node.elseCase != null)
+        if (node.elseCase.Item1 != null)
         {
-            Number elseVal = (Number)res.register(Visit(node.elseCase, context));
+            ValueF elseVal = res.register(Visit(node.elseCase.Item1, context));
             if (res.HasError) return res;
-            return res.success(elseVal);
+            return res.success(node.elseCase.Item2 ? new SpecialValue(SpecialValue.SpecialType.NullVal) : elseVal);
         }
-        return res.success(null);
+        return res.success(new SpecialValue(SpecialValue.SpecialType.NullVal));
 
     }
     public static RTResult Visit_ForNode(ForNode node, ContextHolder context)
@@ -2227,7 +2472,7 @@ static class Interpreter
             res.register(Visit(node.BodyVal, context));
             if (res.HasError) return res;
         }
-        return res.success(new SpecialValue(SpecialValue.SpecialType.NullVal));
+        return res.success(new SpecialValue(SpecialValue.SpecialType.NullVal));//Allways return null
 
     }
     public static RTResult Visit_WhileNode(WhileNode node, ContextHolder context)
@@ -2245,7 +2490,7 @@ static class Interpreter
             res.register(Visit(node.BodyVal, context));
             if (res.HasError) return res;
         }
-        return res.success(new SpecialValue(SpecialValue.SpecialType.NullVal));
+        return res.success(new SpecialValue(SpecialValue.SpecialType.NullVal));//allways returns null
     }
     public static RTResult Visit_FunDefNode(FunDefNode node, ContextHolder context)
     {
@@ -2255,7 +2500,9 @@ static class Interpreter
         Node bodyNode = node.bodyNode;
         List<string> argNames = new List<string>();
         node.argNameToks.ToList().ForEach(x => argNames.Add(x.value.ToString()));
-        Function FuncValue = (Function)new Function(bodyNode, argNames, funName).setContext(context).SetPos(node.PosStart, node.PosEnd);
+        Function FuncValue = (Function)new Function(bodyNode, argNames, funName, node.ShouldReturnNull)
+            .setContext(context)
+            .SetPos(node.PosStart, node.PosEnd);
 
         if (node.tok != null)
             context.symbolTable.Set(funName, FuncValue);
