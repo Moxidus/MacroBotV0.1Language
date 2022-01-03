@@ -59,7 +59,7 @@ namespace MacroBotV0._1Language
             }
         }
 
-        public void CursorClick()
+        public static void CursorClick()
         {
             POINT cursorPos = GetCursorPosition();
             mouse_event(MOUSEEVENTF_LEFTDOWN | MOUSEEVENTF_LEFTUP, (uint)cursorPos.x, (uint)cursorPos.y, 0, 0);

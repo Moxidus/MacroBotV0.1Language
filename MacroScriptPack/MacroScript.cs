@@ -5,6 +5,8 @@ using System.Globalization;
 using System.Reflection;
 using System.Linq;
 using System.Threading;
+using System.Diagnostics;
+using System.ComponentModel;
 
 
 //List of broken things:
@@ -91,6 +93,8 @@ public static class MainScript
         GlobalSymbolTable.Set("MOVE", new BuiltInFun("moveMouse"));
         GlobalSymbolTable.Set("SIN", new BuiltInFun("sin"));
         GlobalSymbolTable.Set("PRESS", new BuiltInFun("press"));
+        GlobalSymbolTable.Set("CLICK", new BuiltInFun("cursorClick"));
+        GlobalSymbolTable.Set("START", new BuiltInFun("startApp"));
         #endregion
 
         #region KeyCodes
@@ -994,12 +998,12 @@ class Parser
     private ParseResult Call()
     {
         ParseResult res = new ParseResult();
-
         List<Node> argsNodes = new List<Node>();
 
         Node atomTemp = res.register(atom());
-        if (res.HasError)
-            return res;
+        if (res.HasError) return res;
+
+
 
         if (current_tok.type == MainScript.TT_LPAREN)
         {
@@ -1018,24 +1022,26 @@ class Parser
                     return res.failure(new InvalidSyntaxError(
                         current_tok.posStart, current_tok.posEnd,
                         "Expected 'VAR', int, float, identifier, '+', '-', ')', '[' or '('"));
-            }
 
-            while (current_tok.type == MainScript.TT_COMMA)
-            {
-                res.registerAdvancement();// Steps over COMMA
+                while (current_tok.type == MainScript.TT_COMMA)
+                {
+                    res.registerAdvancement();// Steps over COMMA
+                    advance();
+
+                    argsNodes.Add(res.register(expr()));
+                    if (res.HasError) return res; // Ends if Error was founds
+                }
+
+                if (current_tok.type != MainScript.TT_RPAREN)
+                    return res.failure(new InvalidSyntaxError(
+                        current_tok.posStart, current_tok.posEnd,
+                        "Expected ',' or ')'"));
+
+                res.registerAdvancement();// Steps over RPAREN
                 advance();
 
-                argsNodes.Add(res.register(expr()));
-                if (res.HasError) return res; // Ends if Error was founds
             }
 
-            if (current_tok.type != MainScript.TT_RPAREN)
-                return res.failure(new InvalidSyntaxError(
-                    current_tok.posStart, current_tok.posEnd,
-                    "Expected ',' or ')'"));
-
-            res.registerAdvancement();// Steps over RPAREN
-            advance();
 
             return res.success(new CallNode(atomTemp, argsNodes));
         }
@@ -2254,6 +2260,8 @@ public class BuiltInFun : BaseFunction
         argNamesDictionary.Add("moveMouse", new List<string>(new string[] { "x", "y" }));
         argNamesDictionary.Add("sin", new List<string>(new string[] { "value"}));
         argNamesDictionary.Add("press", new List<string>(new string[] { "keyCode"}));
+        argNamesDictionary.Add("cursorClick", new List<string>(new string[] { }));
+        argNamesDictionary.Add("startApp", new List<string>(new string[] { "appPath" }));
 
     }
 
@@ -2286,6 +2294,28 @@ public class BuiltInFun : BaseFunction
     }
     //TODO: add usefull build-in functions
     #region built-in funcs
+
+    public static RTResult execute_startApp(ContextHolder execCtx)
+    {
+        ValueF valueF = execCtx.symbolTable.get("appPath");
+        string appPath = valueF.ToString();
+        try
+        {
+            Process.Start(appPath);
+        }
+        catch (Win32Exception ex)
+        {
+            return new RTResult().failure(new RTError(valueF.PosStart, valueF.PosEnd, ex.Message, execCtx));
+        }
+        return new RTResult().success(new SpecialValue(SpecialValue.SpecialType.NullVal));
+    }
+
+
+    public static RTResult execute_cursorClick(ContextHolder execCtx)
+    {
+        Win32.CursorClick();
+        return new RTResult().success(new SpecialValue(SpecialValue.SpecialType.NullVal));
+    }
 
     public static RTResult execute_press(ContextHolder execCtx)
     {
