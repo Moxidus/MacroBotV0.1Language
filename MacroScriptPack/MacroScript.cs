@@ -8,6 +8,9 @@ using System.Threading;
 using System.Diagnostics;
 using System.ComponentModel;
 
+using Emgu.CV;
+using Emgu.CV.Structure;
+
 
 //List of broken things:
 /*
@@ -78,14 +81,14 @@ public static class MainScript
 
     public static Dictionary<char, char> EscapeChars;
 
-    public static (ValueF, CustomError) Run(string fn, string text)
+    public static (ValueF, CustomError) Run(string fn, string text, List<AssetItem> assetItems)
     {
-        //setting global VARIABLES
+        #region setting global VARIABLES
         GlobalSymbolTable.Set("NULL", new SpecialValue(SpecialValue.SpecialType.NullVal));
         GlobalSymbolTable.Set("TRUE", new SpecialValue(SpecialValue.SpecialType.TrueVal));
         GlobalSymbolTable.Set("FALSE", new SpecialValue(SpecialValue.SpecialType.FalseVal));
         GlobalSymbolTable.Set("PI", new Number(MathF.PI));
-
+        #endregion
         #region built-in FUNCTIONS
         GlobalSymbolTable.Set("PRINT", new BuiltInFun("print"));
         GlobalSymbolTable.Set("TO_STRING", new BuiltInFun("toString"));
@@ -96,7 +99,6 @@ public static class MainScript
         GlobalSymbolTable.Set("CLICK", new BuiltInFun("cursorClick"));
         GlobalSymbolTable.Set("START", new BuiltInFun("startApp"));
         #endregion
-
         #region KeyCodes
         GlobalSymbolTable.Set("VK_0", new Number(0x30));
         GlobalSymbolTable.Set("VK_1", new Number(0x31));
@@ -162,7 +164,10 @@ public static class MainScript
         GlobalSymbolTable.Set("VK_F11", new Number(0x7A));
         GlobalSymbolTable.Set("VK_F12", new Number(0x7B));
         #endregion
-
+        #region Creating Image variables
+        foreach(AssetItem im in assetItems)
+            GlobalSymbolTable.Set(im.name, new ImageValue(im.asset));
+        #endregion
         EscapeChars = new Dictionary<char, char>();
         EscapeChars.Add('n','\n');
         EscapeChars.Add('t','\t');
@@ -1903,6 +1908,22 @@ public class SpecialValue: ValueF
     #endregion
 
 }
+public class ImageValue : ValueF
+{
+    Image<Bgr, byte> ImageData;
+    public ImageValue(Image<Bgr, byte> imageData) : base()
+    {
+        this.ImageData = imageData;
+    }
+    public override ValueF Copy()
+    {
+        ImageValue copy = new ImageValue(ImageData.Clone());
+        copy.SetPos(PosStart, PosEnd);
+        copy.setContext(Context);
+        return copy;
+    }
+    public override string ToString() => $"Image[{ImageData.Width}, {ImageData.Height}]";
+}
 public class Number : ValueF
 {
     public float? Value;
@@ -2262,6 +2283,7 @@ public class BuiltInFun : BaseFunction
         argNamesDictionary.Add("press", new List<string>(new string[] { "keyCode"}));
         argNamesDictionary.Add("cursorClick", new List<string>(new string[] { }));
         argNamesDictionary.Add("startApp", new List<string>(new string[] { "appPath" }));
+        //argNamesDictionary.Add("findImage", new List<string>(new string[] { "posList" }));
 
     }
 

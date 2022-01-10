@@ -6,7 +6,7 @@ using Emgu.CV.Structure;
 
 namespace MacroBotV0._1Language
 {
-    class AssetItem
+    public class AssetItem
     {
         public AssetItem(Image<Bgr, byte> asset, string name)
         {
