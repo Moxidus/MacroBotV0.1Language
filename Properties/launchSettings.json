@@ -1,0 +1,8 @@
+{
+  "profiles": {
+    "MacroBotV0.1Language": {
+      "commandName": "Project",
+      "commandLineArgs": "-t START(\\\"notepad.exe\\\") -a \"C:\\Users\\domku\\AppData\\Local\\Temp\\Image01.jpg\""
+    }
+  }
+}

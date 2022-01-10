@@ -6,4 +6,10 @@
     <RootNamespace>MacroBotV0._1Language</RootNamespace>
   </PropertyGroup>
 
+  <ItemGroup>
+    <PackageReference Include="Emgu.CV" Version="4.5.4.4788" />
+    <PackageReference Include="Emgu.CV.Bitmap" Version="4.5.4.4788" />
+    <PackageReference Include="Emgu.CV.runtime.windows" Version="4.5.4.4788" />
+  </ItemGroup>
+
 </Project>
