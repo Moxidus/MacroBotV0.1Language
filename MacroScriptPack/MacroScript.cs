@@ -10,7 +10,10 @@ using System.ComponentModel;
 
 using Emgu.CV;
 using Emgu.CV.Structure;
+using System.Drawing;
 
+using System.Windows;
+using Emgu.CV.CvEnum;
 
 //List of broken things:
 /*
@@ -98,6 +101,7 @@ public static class MainScript
         GlobalSymbolTable.Set("PRESS", new BuiltInFun("press"));
         GlobalSymbolTable.Set("CLICK", new BuiltInFun("cursorClick"));
         GlobalSymbolTable.Set("START", new BuiltInFun("startApp"));
+        GlobalSymbolTable.Set("FIND", new BuiltInFun("findImage"));
         #endregion
         #region KeyCodes
         GlobalSymbolTable.Set("VK_0", new Number(0x30));
@@ -1910,7 +1914,7 @@ public class SpecialValue: ValueF
 }
 public class ImageValue : ValueF
 {
-    Image<Bgr, byte> ImageData;
+    public Image<Bgr, byte> ImageData;
     public ImageValue(Image<Bgr, byte> imageData) : base()
     {
         this.ImageData = imageData;
@@ -2283,7 +2287,7 @@ public class BuiltInFun : BaseFunction
         argNamesDictionary.Add("press", new List<string>(new string[] { "keyCode"}));
         argNamesDictionary.Add("cursorClick", new List<string>(new string[] { }));
         argNamesDictionary.Add("startApp", new List<string>(new string[] { "appPath" }));
-        //argNamesDictionary.Add("findImage", new List<string>(new string[] { "posList" }));
+        argNamesDictionary.Add("findImage", new List<string>(new string[] { "imageVal" }));
 
     }
 
@@ -2317,6 +2321,59 @@ public class BuiltInFun : BaseFunction
     //TODO: add usefull build-in functions
     #region built-in funcs
 
+    public static RTResult findImage_startApp(ContextHolder execCtx)
+    {
+
+        ValueF img = execCtx.symbolTable.get("imageVal");
+        if(img is ImageValue == false)
+            return new RTResult().failure(
+                    new RTError(img.PosStart, img.PosEnd,
+                        "Epected Image", execCtx));
+
+
+        Size screenSize = DisplayTools.GetPhysicalDisplaySize();
+
+        Bitmap bmp = new Bitmap(screenSize.Width, screenSize.Height);
+        using (Graphics gr = Graphics.FromImage(bmp))
+            gr.CopyFromScreen(0, 0, 0, 0, bmp.Size);
+
+
+        Image<Bgr, byte> screenShot = bmp.ToImage<Bgr, byte>();
+        ImageValue imgTemplate = (ImageValue)img;
+
+
+        try
+        {
+            Mat ImgOut = new Mat();
+
+
+            CvInvoke.MatchTemplate(screenShot, imgTemplate.ImageData, ImgOut, TemplateMatchingType.Sqdiff);
+
+
+            double minVal = 0.0;
+            double maxVal = 0.0;
+            Point minLoc = new Point();
+            Point maxLoc = new Point();
+
+            CvInvoke.MinMaxLoc(ImgOut, ref minVal, ref maxVal, ref minLoc, ref maxLoc);
+            Rectangle rectangle = new Rectangle(minLoc, imgTemplate.ImageData.Size);
+            CvInvoke.Rectangle(screenShot, rectangle, new MCvScalar(0, 0, 255), 3);//draws rect on the image
+
+            List<ValueF> Pos = new List<ValueF>();
+            Point center = new Point(Math.Abs(maxLoc.X - minLoc.X), Math.Abs(maxLoc.Y - minLoc.Y));
+            Pos.Add(new Number(center.X));
+            Pos.Add(new Number(center.Y));
+
+            return new RTResult().success(new ListValue(Pos));
+
+        }
+        catch (Exception ex)
+        {
+            return new RTResult().failure(
+                    new RTError(img.PosStart, img.PosEnd,
+                        ex.Message, execCtx));
+        }
+    }
     public static RTResult execute_startApp(ContextHolder execCtx)
     {
         ValueF valueF = execCtx.symbolTable.get("appPath");
