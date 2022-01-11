@@ -2,7 +2,7 @@
   "profiles": {
     "MacroBotV0.1Language": {
       "commandName": "Project",
-      "commandLineArgs": "-t START(\\\"notepad.exe\\\");Image01 -a \"C:\\Users\\domku\\AppData\\Local\\Temp\\Image01.jpg\""
+      "commandLineArgs": "-t \"VAR pos = FIND(Image01);pos;MOVE(pos/0, pos/1);CLICK();PRINT(\\\"DONE\\\");DELAY(1000);CLICK()\" -a \"C:\\Users\\domku\\AppData\\Local\\Temp\\Image01.jpg\""
     }
   }
 }

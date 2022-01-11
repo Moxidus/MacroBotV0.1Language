@@ -2321,7 +2321,7 @@ public class BuiltInFun : BaseFunction
     //TODO: add usefull build-in functions
     #region built-in funcs
 
-    public static RTResult findImage_startApp(ContextHolder execCtx)
+    public static RTResult execute_findImage(ContextHolder execCtx)
     {
 
         ValueF img = execCtx.symbolTable.get("imageVal");
@@ -2356,13 +2356,12 @@ public class BuiltInFun : BaseFunction
             Point maxLoc = new Point();
 
             CvInvoke.MinMaxLoc(ImgOut, ref minVal, ref maxVal, ref minLoc, ref maxLoc);
-            Rectangle rectangle = new Rectangle(minLoc, imgTemplate.ImageData.Size);
-            CvInvoke.Rectangle(screenShot, rectangle, new MCvScalar(0, 0, 255), 3);//draws rect on the image
+            //Rectangle rectangle = new Rectangle(minLoc, imgTemplate.ImageData.Size);
+            //CvInvoke.Rectangle(screenShot, rectangle, new MCvScalar(0, 0, 255), 3);//draws rect on the image
 
             List<ValueF> Pos = new List<ValueF>();
-            Point center = new Point(Math.Abs(maxLoc.X - minLoc.X), Math.Abs(maxLoc.Y - minLoc.Y));
-            Pos.Add(new Number(center.X));
-            Pos.Add(new Number(center.Y));
+            Pos.Add(new Number(minLoc.X + imgTemplate.ImageData.Size.Width/2));
+            Pos.Add(new Number(minLoc.Y + imgTemplate.ImageData.Size.Height/2));
 
             return new RTResult().success(new ListValue(Pos));
 

@@ -110,10 +110,14 @@ namespace MacroBotV0._1Language
                     }
                 }
 
-                List<Image<Bgr, byte>> assetsImages = new List<Image<Bgr, byte>>();
+
+                List<AssetItem> assetsImages = new List<AssetItem>();
 
                 assetPaths.ForEach(x => Console.WriteLine(x));
-                assetPaths.ForEach(x => assetsImages.Add(new Image<Bgr, byte>(x)));
+                foreach (string imPath in assetPaths)
+                {
+                    assetsImages.Add(new AssetItem(new Image<Bgr, byte>(imPath), Path.GetFileNameWithoutExtension(imPath)));
+                }
 
 
 
@@ -129,7 +133,7 @@ namespace MacroBotV0._1Language
                 //return;
 
                 //return;
-                (ValueF, CustomError) tokensAndError = MainScript.Run(fileName, txt);
+                (ValueF, CustomError) tokensAndError = MainScript.Run(fileName, txt, assetsImages);
                 CustomError error = tokensAndError.Item2;
                 ValueF result = tokensAndError.Item1;
 
@@ -137,7 +141,6 @@ namespace MacroBotV0._1Language
                     Console.WriteLine(error);
                 else if (result != null)
                     Console.WriteLine(result.ToString());
-
 
             }
 
@@ -149,7 +152,7 @@ namespace MacroBotV0._1Language
                 if (txt.Trim() == "") continue;
                 // Console.WriteLine(txt);
 
-                (ValueF, CustomError) tokensAndError = MainScript.Run("<TestFileName>" ,txt);
+                (ValueF, CustomError) tokensAndError = MainScript.Run("<TestFileName>" ,txt, new List<AssetItem>());
                 CustomError error = tokensAndError.Item2;
                 ValueF result = tokensAndError.Item1;
 
