@@ -370,16 +370,18 @@ public class Lexer
         while(current_char != null && (current_char != '"' || escapeChar))
         {
             if (escapeChar)
-                str += MainScript.EscapeChars
-                    .GetValueOrDefault<char, char>
-                    ((char)current_char,
-                    (char)current_char);// if it doesnt find escape char it returns current char
-            else if (current_char == '\\')
-                escapeChar = true;
+            {
+                str += MainScript.EscapeChars.GetValueOrDefault<char, char>((char)current_char, (char)current_char);// if it doesnt find escape char it returns current char
+                escapeChar = false;
+            }
             else
-                str += current_char;
+            {
+                if (current_char == '\\')
+                    escapeChar = true;
+                else
+                    str += current_char;
+            }
             advance();
-            escapeChar = false;
         }
         advance();// Steps over ending double Quot
         return new Token(MainScript.TT_STRING, str, posStart, pos);
